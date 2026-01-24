@@ -1,0 +1,12 @@
+# Changes here will be overwritten by Copier
+Authors: lyx
+JuliaMinVersion: '1.10'
+License: MIT
+LicenseCopyrightHolders: lyx
+PackageName: AcceleratedDCTs
+PackageOwner: lyx
+PackageUUID: 16e42a1c-b1d1-5566-807a-fe3b9ee7f6e1
+StrategyConfirmIncluded: false
+StrategyLevel: 1
+StrategyReviewExcluded: false
+_src_path: /home/lyx/.julia/packages/BestieTemplate/GuTb8

@@ -1,0 +1,10 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+LiveServer = "16fef848-5104-11e9-1b77-fb7a48bbb589"
+AcceleratedDCTs = "16e42a1c-b1d1-5566-807a-fe3b9ee7f6e1"
+
+[compat]
+Documenter = "1"
+
+[sources]
+AcceleratedDCTs = {path = ".."}

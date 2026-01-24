@@ -1,0 +1,10 @@
+name = "AcceleratedDCTs"
+uuid = "16e42a1c-b1d1-5566-807a-fe3b9ee7f6e1"
+authors = ["lyx"]
+version = "0.1.0"
+
+[workspace]
+projects = ["test", "docs"]
+
+[compat]
+julia = "1.10"
