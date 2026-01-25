@@ -2,6 +2,268 @@ using KernelAbstractions
 using AbstractFFTs
 using LinearAlgebra
 
+export plan_dct_opt, plan_idct_opt
+
+# ============================================================================
+# AbstractFFTs Plan Definitions
+# ============================================================================
+
+"""
+    DCTOptPlan
+
+Optimized DCT Plan for device-agnostic execution.
+"""
+struct DCTOptPlan{T, N, P, Twiddles, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
+    complex_plan::P      # RFFT plan
+    twiddles::Twiddles   # Tuple of twiddles (w1, w2, ...)
+    tmp_real::BReal      # Real buffer for Permutation
+    tmp_comp::BComp      # Complex buffer for FFT
+    region::Region       # Dimensions
+    pinv::Base.RefValue{Any} # Cache for inverse plan
+end
+
+"""
+    IDCTOptPlan
+
+Optimized IDCT Plan for device-agnostic execution.
+"""
+struct IDCTOptPlan{T, N, P, Twiddles, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
+    complex_plan::P      # IRFFT plan
+    twiddles::Twiddles   # Tuple of twiddles
+    tmp_real::BReal      # Real buffer
+    tmp_comp::BComp      # Complex buffer for Preprocess
+    region::Region
+    pinv::Base.RefValue{Any}
+end
+
+# Properties
+Base.ndims(::DCTOptPlan{T, N}) where {T, N} = N
+Base.ndims(::IDCTOptPlan{T, N}) where {T, N} = N
+
+# Properties
+Base.size(p::DCTOptPlan) = size(p.tmp_real)
+Base.size(p::IDCTOptPlan) = size(p.tmp_real)
+Base.eltype(::DCTOptPlan{T}) where T = T
+Base.eltype(::IDCTOptPlan{T}) where T = T
+
+# Plan creation
+function plan_dct_opt(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
+    # Currently only full transform supported
+    if region != 1:N && region != 1:ndims(x) && region != (1:ndims(x)...,)
+        error("Partial DCT optimization not yet implemented. Use region=1:ndims(x)")
+    end
+    
+    dims = size(x)
+    backend = get_backend(x)
+    
+    # 1. Buffers
+    tmp_real = similar(x)
+    
+    # Complex buffer size calculation (RFFT)
+    # RFFT on real array of size (N1, N2, ...) -> (N1÷2+1, N2, ...)
+    cdims = ntuple(i -> (i == 1) ? (dims[1] ÷ 2 + 1) : dims[i], N)
+    tmp_comp = KernelAbstractions.allocate(backend, Complex{T}, cdims...)
+    
+    # 2. Plan RFFT
+    # We plan on the buffers to avoid destroying input x during planning if possible
+    # AbstractFFTs.plan_rfft typically plans out-of-place or in-place.
+    # We use out-of-place RFFT plan: tmp_real -> tmp_comp
+    complex_plan = plan_rfft(tmp_real)
+    
+    # 3. Twiddles
+    # Generate on CPU, copy to GPU
+    twiddles = ntuple(i -> _get_twiddles_gpu(dims[i], T, backend), N)
+    
+    return DCTOptPlan{T, N, typeof(complex_plan), typeof(twiddles), typeof(tmp_real), typeof(tmp_comp), typeof(region)}(
+        complex_plan, twiddles, tmp_real, tmp_comp, region, Ref{Any}(nothing)
+    )
+end
+
+function plan_idct_opt(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
+    # IDCT Plan
+    if region != 1:N && region != 1:ndims(x) && region != (1:ndims(x)...,)
+        error("Partial IDCT optimization not yet implemented. Use region=1:ndims(x)")
+    end
+    
+    dims = size(x)
+    backend = get_backend(x)
+    
+    # 1. Buffers
+    tmp_real = similar(x)
+    cdims = ntuple(i -> (i == 1) ? (dims[1] ÷ 2 + 1) : dims[i], N)
+    tmp_comp = KernelAbstractions.allocate(backend, Complex{T}, cdims...)
+    
+    # 2. Plan IRFFT
+    # irfft plan: tmp_comp -> tmp_real.
+    # Note: irfft requires length (d) argument for first dimension.
+    complex_plan = plan_irfft(tmp_comp, dims[1])
+    
+    # 3. Twiddles
+    twiddles = ntuple(i -> _get_twiddles_gpu(dims[i], T, backend), N)
+    
+    return IDCTOptPlan{T, N, typeof(complex_plan), typeof(twiddles), typeof(tmp_real), typeof(tmp_comp), typeof(region)}(
+        complex_plan, twiddles, tmp_real, tmp_comp, region, Ref{Any}(nothing)
+    )
+end
+
+# Inversion (caching)
+function Base.inv(p::DCTOptPlan{T, N}) where {T, N}
+    if p.pinv[] === nothing
+        # create inverse plan matching p
+        # We need an IDCT plan compatible with the dimensions
+        # Use tmp_real to template the IDCT plan
+        p.pinv[] = plan_idct_opt(p.tmp_real, p.region)
+    end
+    return p.pinv[]
+end
+
+function Base.inv(p::IDCTOptPlan{T, N}) where {T, N}
+    if p.pinv[] === nothing
+        p.pinv[] = plan_dct_opt(p.tmp_real, p.region)
+    end
+    return p.pinv[]
+end
+
+# Execution: *
+function Base.:*(p::DCTOptPlan, x::AbstractArray)
+    y = similar(x)
+    mul!(y, p, x)
+    return y
+end
+
+function Base.:*(p::IDCTOptPlan, x::AbstractArray)
+    y = similar(x)
+    mul!(y, p, x)
+    return y
+end
+
+# Execution: \ (ldiv)
+function Base.:\(p::DCTOptPlan, x::AbstractArray)
+    # plan \ x == inv(plan) * x
+    inv_p = inv(p)
+    return inv_p * x
+end
+
+function Base.:\(p::IDCTOptPlan, x::AbstractArray)
+    inv_p = inv(p)
+    return inv_p * x
+end
+
+# Execution: mul! and ldiv!
+
+# dct!
+function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 2}, x::AbstractArray) where T
+    backend = get_backend(x)
+    N1, N2 = size(x)
+    
+    # 1. Preprocess: x -> p.tmp_real
+    dct_2d_preprocess_kernel!(backend)(
+        p.tmp_real, x, N1, N2, (N1-1)÷2, (N2-1)÷2; 
+        ndrange=(N1, N2)
+    )
+    KernelAbstractions.synchronize(backend)
+    
+    # 2. FFT: p.tmp_real -> p.tmp_comp
+    # Use mul! for the internal FFT plan
+    mul!(p.tmp_comp, p.complex_plan, p.tmp_real)
+    
+    # 3. Postprocess: p.tmp_comp -> y
+    w1, w2 = p.twiddles
+    dct_2d_postprocess_kernel!(backend)(
+        y, p.tmp_comp, w1, w2, N1, N2;
+        ndrange=(N1, N2)
+    )
+    KernelAbstractions.synchronize(backend)
+    return y
+end
+
+function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 3}, x::AbstractArray) where T
+    backend = get_backend(x)
+    N1, N2, N3 = size(x)
+    
+    # 1. Preprocess
+    dct_3d_preprocess_kernel!(backend)(
+        p.tmp_real, x, N1, N2, N3, (N1-1)÷2, (N2-1)÷2, (N3-1)÷2;
+        ndrange=(N1, N2, N3)
+    )
+    KernelAbstractions.synchronize(backend)
+    
+    # 2. FFT
+    mul!(p.tmp_comp, p.complex_plan, p.tmp_real)
+    
+    # 3. Postprocess
+    w1, w2, w3 = p.twiddles
+    dct_3d_postprocess_kernel!(backend)(
+        y, p.tmp_comp, w1, w2, w3, N1, N2, N3;
+        ndrange=(N1, N2, N3)
+    )
+    KernelAbstractions.synchronize(backend)
+    return y
+end
+
+# idct! (via mul!(y, inv_plan, x))
+function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 2}, x::AbstractArray) where T
+    backend = get_backend(x)
+    N1, N2 = size(x)
+    limit_n1 = N1 ÷ 2
+    
+    # 1. Preprocess: x -> p.tmp_comp
+    w1, w2 = p.twiddles
+    idct_2d_preprocess_kernel!(backend)(
+        p.tmp_comp, x, w1, w2, N1, N2, limit_n1;
+        ndrange=(limit_n1+1, N2)
+    )
+    KernelAbstractions.synchronize(backend)
+    
+    # 2. IRFFT: p.tmp_comp -> p.tmp_real
+    mul!(p.tmp_real, p.complex_plan, p.tmp_comp)
+    
+    # 3. Postprocess: p.tmp_real -> y
+    idct_2d_postprocess_kernel!(backend)(
+        y, p.tmp_real, N1, N2;
+        ndrange=(N1, N2)
+    )
+    KernelAbstractions.synchronize(backend)
+    return y
+end
+
+function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 3}, x::AbstractArray) where T
+    backend = get_backend(x)
+    N1, N2, N3 = size(x)
+    limit_n1 = N1 ÷ 2
+    
+    # 1. Preprocess
+    w1, w2, w3 = p.twiddles
+    idct_3d_preprocess_kernel!(backend)(
+        p.tmp_comp, x, w1, w2, w3, N1, N2, N3, limit_n1;
+        ndrange=(limit_n1+1, N2, N3)
+    )
+    KernelAbstractions.synchronize(backend)
+    
+    # 2. IRFFT
+    mul!(p.tmp_real, p.complex_plan, p.tmp_comp)
+    
+    # 3. Postprocess
+    idct_3d_postprocess_kernel!(backend)(
+        y, p.tmp_real, N1, N2, N3;
+        ndrange=(N1, N2, N3)
+    )
+    KernelAbstractions.synchronize(backend)
+    return y
+end
+
+# Support ldiv!(y, plan, x) => mul!(y, inv(plan), x)
+function LinearAlgebra.ldiv!(y::AbstractArray, p::DCTOptPlan, x::AbstractArray)
+    inv_p = inv(p)
+    mul!(y, inv_p, x)
+end
+
+function LinearAlgebra.ldiv!(y::AbstractArray, p::IDCTOptPlan, x::AbstractArray)
+    inv_p = inv(p)
+    mul!(y, inv_p, x)
+end
+
+
 # ============================================================================
 # 2D Kernels
 # ============================================================================
@@ -241,133 +503,27 @@ end
 end
 
 # ============================================================================
-# Main Functions
+# Convenience Functions (using One-Shot plan)
 # ============================================================================
 
 function dct_2d_opt(x::AbstractMatrix{T}) where T <: Real
-    N1, N2 = size(x)
-    backend = get_backend(x)
-    
-    # 1. Preprocess
-    x_prime = similar(x)
-    
-    dct_2d_preprocess_kernel!(backend)(
-        x_prime, x, N1, N2, (N1-1)÷2, (N2-1)÷2; 
-        ndrange=(N1, N2)
-    )
-    KernelAbstractions.synchronize(backend)
-    
-    # 2. FFT
-    X = rfft(x_prime) 
-    # Note: X will be on the same backend if rfft supports it (CUDA.CUFFT / FFTW)
-    
-    # 3. Postprocess
-    y = similar(x)
-    w1 = _get_twiddles_gpu(N1, T, backend)
-    w2 = _get_twiddles_gpu(N2, T, backend)
-    
-    dct_2d_postprocess_kernel!(backend)(
-        y, X, w1, w2, N1, N2;
-        ndrange=(N1, N2)
-    )
-    KernelAbstractions.synchronize(backend)
-    
-    return y
+    p = plan_dct_opt(x)
+    return p * x
 end
 
 function idct_2d_opt(x::AbstractMatrix{T}) where T <: Real
-    N1, N2 = size(x)
-    backend = get_backend(x)
-    
-    # 1. Preprocess
-    limit_n1 = N1 ÷ 2
-    # Output complex array for IRFFT
-    # Size: (N1÷2 + 1, N2)
-    X_prime = KernelAbstractions.allocate(backend, Complex{T}, limit_n1+1, N2)
-    
-    w1 = _get_twiddles_gpu(N1, T, backend)
-    w2 = _get_twiddles_gpu(N2, T, backend)
-    
-    idct_2d_preprocess_kernel!(backend)(
-        X_prime, x, w1, w2, N1, N2, limit_n1;
-        ndrange=(limit_n1+1, N2)
-    )
-    KernelAbstractions.synchronize(backend)
-    
-    # 2. IRFFT
-    x_spatial = irfft(X_prime, N1)
-    
-    # 3. Postprocess
-    y = similar(x)
-    idct_2d_postprocess_kernel!(backend)(
-        y, x_spatial, N1, N2;
-        ndrange=(N1, N2)
-    )
-    KernelAbstractions.synchronize(backend)
-    
-    return y
+    p = plan_idct_opt(x)
+    return p * x
 end
 
 function dct_3d_opt(x::AbstractArray{T, 3}) where T <: Real
-    N1, N2, N3 = size(x)
-    backend = get_backend(x)
-    
-    # 1. Preprocess
-    x_prime = similar(x)
-    dct_3d_preprocess_kernel!(backend)(
-        x_prime, x, N1, N2, N3, (N1-1)÷2, (N2-1)÷2, (N3-1)÷2;
-        ndrange=(N1, N2, N3)
-    )
-    KernelAbstractions.synchronize(backend)
-    
-    # 2. FFT
-    X = rfft(x_prime)
-    
-    # 3. Postprocess
-    y = similar(x)
-    w1 = _get_twiddles_gpu(N1, T, backend)
-    w2 = _get_twiddles_gpu(N2, T, backend)
-    w3 = _get_twiddles_gpu(N3, T, backend)
-    
-    dct_3d_postprocess_kernel!(backend)(
-        y, X, w1, w2, w3, N1, N2, N3;
-        ndrange=(N1, N2, N3)
-    )
-    KernelAbstractions.synchronize(backend)
-    
-    return y
+    p = plan_dct_opt(x)
+    return p * x
 end
 
 function idct_3d_opt(x::AbstractArray{T, 3}) where T <: Real
-    N1, N2, N3 = size(x)
-    backend = get_backend(x)
-    
-    # 1. Preprocess
-    limit_n1 = N1 ÷ 2
-    X_prime = KernelAbstractions.allocate(backend, Complex{T}, limit_n1+1, N2, N3)
-    
-    w1 = _get_twiddles_gpu(N1, T, backend)
-    w2 = _get_twiddles_gpu(N2, T, backend)
-    w3 = _get_twiddles_gpu(N3, T, backend)
-    
-    idct_3d_preprocess_kernel!(backend)(
-        X_prime, x, w1, w2, w3, N1, N2, N3, limit_n1;
-        ndrange=(limit_n1+1, N2, N3)
-    )
-    KernelAbstractions.synchronize(backend)
-    
-    # 2. IRFFT
-    x_spatial = irfft(X_prime, N1)
-    
-    # 3. Postprocess
-    y = similar(x)
-    idct_3d_postprocess_kernel!(backend)(
-        y, x_spatial, N1, N2, N3;
-        ndrange=(N1, N2, N3)
-    )
-    KernelAbstractions.synchronize(backend)
-    
-    return y
+    p = plan_idct_opt(x)
+    return p * x
 end
 
 # ============================================================================
@@ -379,7 +535,7 @@ function _get_twiddles_gpu(N::Int, ::Type{T}, backend) where T
     # To optimize, we could add a caching mechanism like DCTPlan.
     
     # Alloc on CPU
-    w_cpu = [cis(-T(π) * n / (2N)) for n in 0:(N-1)]
+    w_cpu = [cispi(-T(n) / (2N)) for n in 0:(N-1)]
     
     # Alloc on Device and Copy
     w_dev = KernelAbstractions.allocate(backend, Complex{T}, N)

@@ -116,9 +116,15 @@ function safe_benchmark(name, f, x; n_warmup=2, n_samples=10)
     end
 end
 
-# 1. Benchmark dct_3d_opt
-println("Description: 3D DCT using KernelAbstractions (Algorithm 3)")
-times_dct_opt = safe_benchmark("dct_3d_opt", dct_3d_opt, x_gpu)
+# 1. Benchmark dct_3d_opt (No Plan Reuse)
+println("Description: 3D DCT (Algorithm 3) - Plan creation + Execution")
+times_dct_opt = safe_benchmark("dct_3d_opt (One-shot)", dct_3d_opt, x_gpu)
+println()
+
+# 1b. Benchmark dct_3d_opt (With Plan Reuse)
+println("Description: 3D DCT (Algorithm 3) - Precomputed Plan (Execution Only)")
+p = plan_dct_opt(x_gpu) # Precompute plan
+times_dct_opt_plan = safe_benchmark("dct_3d_opt (Cached Plan)", x -> p * x, x_gpu)
 println()
 
 # 2. Benchmark dct_fast
@@ -145,9 +151,12 @@ if !isnan(times_rfft[1])
     println("DCT Variants:")
     if !isnan(times_dct_opt[1])
         t_opt = median(times_dct_opt)
-        println("  dct_3d_opt (Alg 3):      $(round(t_opt, digits=3)) ms ($(round(t_opt/baseline, digits=2))x slower vs FFT)")
+        t_opt_p = median(times_dct_opt_plan)
+        println("  dct_3d_opt (One-shot):   $(round(t_opt, digits=3)) ms ($(round(t_opt/baseline, digits=2))x slower vs FFT)")
+        println("  dct_3d_opt (Plan):       $(round(t_opt_p, digits=3)) ms ($(round(t_opt_p/baseline, digits=2))x slower vs FFT)")
+        println("     -> Plan Speedup:      $(round(t_opt/t_opt_p, digits=2))x improvement from caching")
     else
-        println("  dct_3d_opt (Alg 3):      OOM / FAILED")
+        println("  dct_3d_opt:              OOM / FAILED")
     end
     
     if !isnan(times_dct_fast[1])

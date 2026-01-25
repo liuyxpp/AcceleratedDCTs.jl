@@ -1,10 +1,9 @@
 # Benchmark: Compare Algorithm 3 3D DCT (opt) vs dct_fast vs FFTW rfft on CPU
 #
 # This script compares the performance of:
-# 1. dct_3d_opt (Algorithm 3) - new 3D implementation in pure Julia
-# 2. dct_fast (Batched) - efficient separable 1D implementation
+# 1. dct_3d_opt (Algorithm 3)
+# 2. dct_fast (Batched)
 # 3. FFTW rfft - native FFTW 3D R2C FFT (baseline)
-# 4. dct3d (Reference) - naive separable implementation
 #
 # Measured on CPU with N³ grids.
 
@@ -18,7 +17,7 @@ push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 using AcceleratedDCTs
 
 println("="^60)
-println("Benchmark: 3D DCT (Algorithm 3) vs dct_fast vs FFTW rfft (CPU)")
+println("Benchmark: 3D DCT (Algorithm 3) w/ Plan vs dct_fast vs FFTW rfft (CPU)")
 println("="^60)
 println()
 
@@ -40,6 +39,8 @@ println()
 
 # Warmup
 println("Warming up...")
+p = plan_dct_opt(x_cpu)
+_ = p * x_cpu
 _ = dct_3d_opt(x_cpu)
 _ = dct_fast(x_cpu)
 _ = rfft(x_cpu)
@@ -73,12 +74,19 @@ println("Benchmarking dct_3d_opt (Algorithm 3)...")
 println("Description: Manual 3D RFFT wrapper with recursive post-processing")
 println("-"^60)
 
+# 1a. One-shot
+println("Type: One-shot (dct_3d_opt)")
 times_dct_opt = benchmark_cpu(dct_3d_opt, x_cpu)
-println("  Minimum time:  $(round(minimum(times_dct_opt), digits=3)) ms")
 println("  Median time:   $(round(median(times_dct_opt), digits=3)) ms")
-println("  Mean time:     $(round(mean(times_dct_opt), digits=3)) ms")
-println("  Maximum time:  $(round(maximum(times_dct_opt), digits=3)) ms")
 println()
+
+# 1b. Plan-based
+println("Type: Plan-based (p * x)")
+p_cpu = plan_dct_opt(x_cpu)
+times_dct_opt_plan = benchmark_cpu(x -> p_cpu * x, x_cpu)
+println("  Median time:   $(round(median(times_dct_opt_plan), digits=3)) ms")
+println()
+
 
 # ============================================================================
 # Benchmark dct_fast (Batched Separable)
@@ -89,10 +97,7 @@ println("Description: 3x Separable 1D DCTs using batched kernels + transposes")
 println("-"^60)
 
 times_dct_fast = benchmark_cpu(dct_fast, x_cpu)
-println("  Minimum time:  $(round(minimum(times_dct_fast), digits=3)) ms")
 println("  Median time:   $(round(median(times_dct_fast), digits=3)) ms")
-println("  Mean time:     $(round(mean(times_dct_fast), digits=3)) ms")
-println("  Maximum time:  $(round(maximum(times_dct_fast), digits=3)) ms")
 println()
 
 # ============================================================================
@@ -104,10 +109,7 @@ println("Description: Native highly-optimized FFT library")
 println("-"^60)
 
 times_rfft = benchmark_cpu(rfft, x_cpu)
-println("  Minimum time:  $(round(minimum(times_rfft), digits=3)) ms")
 println("  Median time:   $(round(median(times_rfft), digits=3)) ms")
-println("  Mean time:     $(round(mean(times_rfft), digits=3)) ms")
-println("  Maximum time:  $(round(maximum(times_rfft), digits=3)) ms")
 println()
 
 # ============================================================================
@@ -119,24 +121,30 @@ println("="^60)
 
 baseline = median(times_rfft)
 time_opt = median(times_dct_opt)
+time_opt_plan = median(times_dct_opt_plan)
 time_fast = median(times_dct_fast)
 
 ratio_opt = time_opt / baseline
+ratio_opt_plan = time_opt_plan / baseline
 ratio_fast = time_fast / baseline
-speedup_opt_vs_fast = time_fast / time_opt
+speedup_plan = time_opt / time_opt_plan
 
 println()
 println("Baselines:")
 println("  FFTW rfft:               $(round(baseline, digits=3)) ms")
 println()
 println("DCT Variants:")
-println("  dct_3d_opt (Algorithm 3): $(round(time_opt, digits=3)) ms ($(round(ratio_opt, digits=2))x slower vs FFT)")
+println("  dct_3d_opt (One-shot):   $(round(time_opt, digits=3)) ms ($(round(ratio_opt, digits=2))x slower vs FFT)")
+println("  dct_3d_opt (Plan):       $(round(time_opt_plan, digits=3)) ms ($(round(ratio_opt_plan, digits=2))x slower vs FFT)")
+println("     -> Plan Speedup:      $(round(speedup_plan, digits=2))x improvement")
 println("  dct_fast (Batched):       $(round(time_fast, digits=3)) ms ($(round(ratio_fast, digits=2))x slower vs FFT)")
 println()
 println("Comparison:")
-if speedup_opt_vs_fast > 1.0
-    println("  • Algorithm 3 is $(round(speedup_opt_vs_fast, digits=2))x FASTER than dct_fast")
+if time_opt_plan < time_fast
+    speedup = time_fast / time_opt_plan
+    println("  • Algorithm 3 (Plan) is $(round(speedup, digits=2))x FASTER than dct_fast")
 else
-    println("  • Algorithm 3 is $(round(1/speedup_opt_vs_fast, digits=2))x SLOWER than dct_fast")
+    speedup = time_opt_plan / time_fast
+    println("  • Algorithm 3 (Plan) is $(round(speedup, digits=2))x SLOWER than dct_fast")
 end
 println()
