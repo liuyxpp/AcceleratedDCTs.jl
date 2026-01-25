@@ -1,4 +1,4 @@
-# AcceleratedDCTs
+# AcceleratedDCTs.jl
 
 [![Stable Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://lyx.github.io/AcceleratedDCTs.jl/stable)
 [![Development documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://lyx.github.io/AcceleratedDCTs.jl/dev)
@@ -7,3 +7,71 @@
 [![Docs workflow Status](https://github.com/lyx/AcceleratedDCTs.jl/actions/workflows/Docs.yml/badge.svg?branch=main)](https://github.com/lyx/AcceleratedDCTs.jl/actions/workflows/Docs.yml?query=branch%3Amain)
 [![BestieTemplate](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/JuliaBesties/BestieTemplate.jl/main/docs/src/assets/badge.json)](https://github.com/JuliaBesties/BestieTemplate.jl)
 
+**Fast, Device-Agnostic, AbstractFFTs-compatible DCT library for Julia.**
+
+AcceleratedDCTs.jl provides highly optimized Discrete Cosine Transform (DCT-II) and Inverse DCT (DCT-III) implementations for 2D and 3D data. It leverages **KernelAbstractions.jl** to run efficiently on both CPUs (multithreaded) and GPUs (CUDA, AMD, etc.), and implements the **AbstractFFTs.jl** interface for easy integration.
+
+## Key Features
+
+*   **⚡ High Performance**: optimized algorithms (Makhoul's method) that outperform standard separable approaches on GPU (~1.8x speedup for 3D).
+*   **🚀 Device Agnostic**: Runs on CPU (Threads) and GPU (`CuArray`, `ROCArray` via `KernelAbstractions`).
+*   **🧩 AbstractFFTs Compatible**: Zero-allocation `mul!`, `ldiv!`, and precomputed `Plan` support.
+*   **📦 3D Optimized**: Specialized 3D kernels that avoid redundant transposes.
+
+## Installation
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/liuyxpp/AcceleratedDCTs.jl")
+```
+
+## Quick Start
+
+### Basic Usage
+
+```julia
+using AcceleratedDCTs
+using CUDA
+
+# 1. Create Data
+N = 128
+x_gpu = CUDA.rand(Float64, N, N, N)
+
+# 2. Create Optimized Plan (Recommended)
+p = plan_dct_opt(x_gpu)
+
+# 3. Execute
+y = p * x_gpu           # Standard execution
+mul!(y, p, x_gpu)       # Zero-allocation (in-place output)
+
+# 4. Inverse
+x_rec = p \ y
+# or
+inv_p = inv(p)
+mul!(x_rec, inv_p, y)
+```
+
+### One-shot Functions
+
+For convenience (slower due to plan creation overhead):
+
+```julia
+y = dct_3d_opt(x_gpu)
+x_rec = idct_3d_opt(y)
+```
+
+## Benchmarks (RTX 2080 Ti)
+
+On a $384 \times 384 \times 384$ grid:
+
+| Implementation | Time (ms) | Speed vs FFT | Note |
+| :--- | :--- | :--- | :--- |
+| `cuFFT rfft` (Baseline) | 26 ms | 1.0x | Native FFT Limit |
+| **`dct_3d_opt` (This Package)** | **42 ms** | **1.6x slower** | **Best DCT** |
+| `dct_fast` (Batched) | 77 ms | 2.9x slower | Naive Separable |
+
+*See `benchmark/` folder for reproduction scripts.*
+
+## Documentation
+
+For detailed theory, algorithm explanation, and advanced usage, see [docs/Documentation.md](docs/Documentation.md).
