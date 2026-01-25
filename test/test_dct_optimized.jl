@@ -4,7 +4,7 @@ using AcceleratedDCTs
 using LinearAlgebra
 using Statistics
 
-@testset "Optimized 2D DCT (Algorithm 2)" begin
+@testset "Optimized 2D DCT" begin
     
     @testset "Roundtrip Accuracy" begin
         # Test square and non-square matrices
@@ -56,25 +56,26 @@ using Statistics
         @test all(isapprox.(ratio, 4.0, atol=1e-5))
     end
     
-    @testset "Optimized 3D DCT (Algorithm 3)" begin
-        @testset "Roundtrip Accuracy" begin
-            sizes = [(4, 4, 4), (8, 8, 8), (4, 8, 4)]
-            for sz in sizes
-                x = rand(sz...)
-                y = dct_3d_opt(x)
-                x_rec = idct_3d_opt(y)
-                @test x_rec ≈ x atol=1e-13
-            end
+end
+
+@testset "Optimized 3D DCT (Algorithm 3)" begin
+    @testset "Roundtrip Accuracy" begin
+        sizes = [(4, 4, 4), (8, 8, 8), (4, 8, 4)]
+        for sz in sizes
+            x = rand(sz...)
+            y = dct_3d_opt(x)
+            x_rec = idct_3d_opt(y)
+            @test x_rec ≈ x atol=1e-13
         end
-        
-        @testset "Consistency with Reference DCT" begin
-             # 2D has factor 4. 3D should have factor 8?
-             N1, N2, N3 = 4, 4, 4
-             x = rand(N1, N2, N3)
-             y_ref = dct3d(x)
-             y_opt = dct_3d_opt(x)
-             ratio = y_opt ./ y_ref
-             @test all(isapprox.(ratio, 8.0, atol=1e-5))
-        end
+    end
+    
+    @testset "Consistency with Reference DCT" begin
+            # 2D has factor 4. 3D should have factor 8?
+            N1, N2, N3 = 4, 4, 4
+            x = rand(N1, N2, N3)
+            y_ref = dct3d(x)
+            y_opt = dct_3d_opt(x)
+            ratio = y_opt ./ y_ref
+            @test all(isapprox.(ratio, 8.0, atol=1e-5))
     end
 end

@@ -159,7 +159,8 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 2}, x::AbstractAr
     # 1. Preprocess: x -> p.tmp_real
     dct_2d_preprocess_kernel!(backend)(
         p.tmp_real, x, N1, N2, (N1-1)÷2, (N2-1)÷2; 
-        ndrange=(N1, N2)
+        ndrange=(N1, N2),
+        workgroupsize=(16, 16)
     )
     KernelAbstractions.synchronize(backend)
     
@@ -171,7 +172,8 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 2}, x::AbstractAr
     w1, w2 = p.twiddles
     dct_2d_postprocess_kernel!(backend)(
         y, p.tmp_comp, w1, w2, N1, N2;
-        ndrange=(N1, N2)
+        ndrange=(N1, N2),
+        workgroupsize=(16, 16)
     )
     KernelAbstractions.synchronize(backend)
     return y
@@ -184,7 +186,8 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 3}, x::AbstractAr
     # 1. Preprocess
     dct_3d_preprocess_kernel!(backend)(
         p.tmp_real, x, N1, N2, N3, (N1-1)÷2, (N2-1)÷2, (N3-1)÷2;
-        ndrange=(N1, N2, N3)
+        ndrange=(N1, N2, N3),
+        workgroupsize=(8, 8, 4)
     )
     KernelAbstractions.synchronize(backend)
     
@@ -195,7 +198,8 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 3}, x::AbstractAr
     w1, w2, w3 = p.twiddles
     dct_3d_postprocess_kernel!(backend)(
         y, p.tmp_comp, w1, w2, w3, N1, N2, N3;
-        ndrange=(N1, N2, N3)
+        ndrange=(N1, N2, N3),
+        workgroupsize=(8, 8, 4)
     )
     KernelAbstractions.synchronize(backend)
     return y
@@ -211,7 +215,8 @@ function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 2}, x::AbstractA
     w1, w2 = p.twiddles
     idct_2d_preprocess_kernel!(backend)(
         p.tmp_comp, x, w1, w2, N1, N2, limit_n1;
-        ndrange=(limit_n1+1, N2)
+        ndrange=(limit_n1+1, N2),
+        workgroupsize=(16, 16)
     )
     KernelAbstractions.synchronize(backend)
     
@@ -221,7 +226,8 @@ function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 2}, x::AbstractA
     # 3. Postprocess: p.tmp_real -> y
     idct_2d_postprocess_kernel!(backend)(
         y, p.tmp_real, N1, N2;
-        ndrange=(N1, N2)
+        ndrange=(N1, N2),
+        workgroupsize=(16, 16)
     )
     KernelAbstractions.synchronize(backend)
     return y
@@ -236,7 +242,8 @@ function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 3}, x::AbstractA
     w1, w2, w3 = p.twiddles
     idct_3d_preprocess_kernel!(backend)(
         p.tmp_comp, x, w1, w2, w3, N1, N2, N3, limit_n1;
-        ndrange=(limit_n1+1, N2, N3)
+        ndrange=(limit_n1+1, N2, N3),
+        workgroupsize=(8, 8, 4)
     )
     KernelAbstractions.synchronize(backend)
     
@@ -246,7 +253,8 @@ function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 3}, x::AbstractA
     # 3. Postprocess
     idct_3d_postprocess_kernel!(backend)(
         y, p.tmp_real, N1, N2, N3;
-        ndrange=(N1, N2, N3)
+        ndrange=(N1, N2, N3),
+        workgroupsize=(8, 8, 4)
     )
     KernelAbstractions.synchronize(backend)
     return y
@@ -296,29 +304,12 @@ end
         W2 = w2[n2+1]
         W1 = w1[n1+1]
         
-        # Access X with Hermitian symmetry handling for n1 (first dimension of RFFT)
-        # val1 = X[n1, n2]
-        if n1 <= (N1 ÷ 2)
-            val1 = X[n1+1, n2+1]
-        else
-            # X[n1, n2] = conj(X[N1-n1, N2-n2])
-            n1_sym = N1 - n1
-            n2_sym = (n2 == 0) ? 0 : N2 - n2
-            val1 = conj(X[n1_sym+1, n2_sym+1])
-        end
+        # val1 = X[n1, n2] with Hermitian symmetry
+        val1 = _get_X2_val(X, n1, n2, N1, N2)
         
         # val2 = X[N1-n1, n2]
-        # logic for N1-n1:
-        # if n1=0 -> N1 -> sym to 0. (X(0) is real, X(N)=X(0) is periodic assumption from derivation)
         n1_b = (n1 == 0) ? 0 : N1 - n1
-        
-        if n1_b <= (N1 ÷ 2)
-            val2 = X[n1_b+1, n2+1]
-        else
-            n1_sym_b = N1 - n1_b
-            n2_sym_b = (n2 == 0) ? 0 : N2 - n2
-            val2 = conj(X[n1_sym_b+1, n2_sym_b+1])
-        end
+        val2 = _get_X2_val(X, n1_b, n2, N1, N2)
         
         term = W1 * val1 + conj(W1) * val2
         y[n1+1, n2+1] = 2 * real(W2 * term)
