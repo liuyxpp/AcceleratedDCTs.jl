@@ -2,9 +2,64 @@ import FFTW
 using Test
 using AcceleratedDCTs
 using AcceleratedDCTs: dct, idct, plan_dct, DCTPlan, dct!, idct!
-using AcceleratedDCTs: dct2d, dct3d # Reference implementations
+using AcceleratedDCTs: dct1d, dct2d, dct3d # Reference implementations
 using LinearAlgebra: mul!, ldiv!
 using Statistics
+
+@testset "Optimized DCT-II (1D)" begin
+    N = 16
+    x = rand(Float64, N)
+    
+    @testset "Core API Functionality" begin
+        p = plan_dct(x)
+        y = p * x
+        
+        # Convenience
+        @test dct(x) ≈ y
+        
+        # In-place
+        x_copy = copy(x)
+        dct!(x_copy)
+        @test x_copy ≈ y
+        
+        # Inverse
+        x_rec = idct(y)
+        @test x_rec ≈ x atol=1e-12
+        
+        # Inverse plan
+        x_ldiv = similar(x)
+        ldiv!(x_ldiv, p, y)
+        @test x_ldiv ≈ x atol=1e-12
+    end
+    
+    @testset "Roundtrip Accuracy" begin
+        for N in [8, 16, 32, 63, 64] # Test odd/even sizes if supported (kernels handle odd?)
+                                     # Wait, odd sizes logic in kernels:
+                                     # k even -> k/2. k odd -> N - (k+1)/2.
+                                     # 2k = k' -> dest.
+                                     # If N=5. 0->0, 2->1, 4->2.
+                                     # 1 -> 5-(2)/2 = 4. 3 -> 5-(4)/2 = 3.
+                                     # 0,1,2,3,4 destinations covered.
+                                     # Logic holds for odd sizes.
+            x = rand(N)
+            y = dct(x)
+            x_rec = idct(y)
+            @test x_rec ≈ x atol=1e-12
+        end
+    end
+    
+    @testset "Consistency with Reference DCT" begin
+        # 1D has factor 2.0?
+        # N=16
+        x = rand(16)
+        y_ref = dct1d(x)
+        y_opt = dct(x)
+        ratio = y_opt ./ y_ref
+        
+        # Check if ratio is consistently 2.0
+        @test all(isapprox.(ratio, 2.0, atol=1e-5))
+    end
+end
 
 @testset "Optimized DCT-II (2D)" begin
     # ------------------------------------------------------------------
