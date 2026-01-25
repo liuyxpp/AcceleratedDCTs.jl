@@ -131,6 +131,67 @@ function get_inv_twiddles(N::Int, ::Type{T}, backend) where T
 end
 
 # ============================================================================
+# In-place permutedims kernels (GPU-compatible)
+# ============================================================================
+
+"""
+3D permutedims! kernel: dst[i,j,k] = src[perm_inverse...]
+perm specifies the output dimension order from input dimensions.
+"""
+@kernel function permutedims_3d_kernel!(dst, @Const(src), perm1, perm2, perm3)
+    I = @index(Global, Cartesian)
+    i, j, k = I[1], I[2], I[3]
+    
+    # Build source index based on permutation
+    # perm = (p1, p2, p3) means dst[i,j,k] = src[idx[p1], idx[p2], idx[p3]]
+    # where idx = (i, j, k)
+    idx = (i, j, k)
+    @inbounds dst[i, j, k] = src[idx[perm1], idx[perm2], idx[perm3]]
+end
+
+"""
+    permutedims_3d!(dst, src, perm)
+
+In-place 3D permutedims using KernelAbstractions. 
+Zero allocation after initial kernel compilation.
+"""
+function permutedims_3d!(dst::AbstractArray{T,3}, src::AbstractArray{T,3}, perm::NTuple{3,Int}) where T
+    be = get_backend(dst)
+    ndrange = size(dst)
+    
+    # Convert perm to inverse permutation for indexing
+    # If perm = (2,1,3), then dst[i,j,k] = src[j,i,k]
+    # We need inv_perm such that inv_perm[perm[d]] = d
+    inv_perm = ntuple(d -> findfirst(==(d), perm), 3)
+    
+    permutedims_3d_kernel!(be)(dst, src, inv_perm[1], inv_perm[2], inv_perm[3]; ndrange=ndrange)
+    KernelAbstractions.synchronize(be)
+    return dst
+end
+
+"""
+2D permutedims! kernel
+"""
+@kernel function permutedims_2d_kernel!(dst, @Const(src))
+    I = @index(Global, Cartesian)
+    i, j = I[1], I[2]
+    @inbounds dst[i, j] = src[j, i]
+end
+
+"""
+    permutedims_2d!(dst, src)
+
+In-place 2D transpose using KernelAbstractions.
+"""
+function permutedims_2d!(dst::AbstractMatrix{T}, src::AbstractMatrix{T}) where T
+    be = get_backend(dst)
+    ndrange = size(dst)
+    permutedims_2d_kernel!(be)(dst, src; ndrange=ndrange)
+    KernelAbstractions.synchronize(be)
+    return dst
+end
+
+# ============================================================================
 # DCTPlan: Precomputed plans, twiddles, and buffers for N-D DCT/IDCT
 # ============================================================================
 
@@ -143,12 +204,15 @@ Contains cached:
 - FFT plans for each dimension
 - Twiddle factors for each dimension
 - Work buffers to avoid allocations
+- Temp buffer for zero-allocation mul! operations
 
 # Usage
 ```julia
 plan = plan_dct(x)           # Create plan for arrays like x
-y = plan * x                 # Compute DCT
+y = plan * x                 # Compute DCT (allocates output)
+mul!(y, plan, x)             # Compute DCT (zero allocation)
 x_reconstructed = plan \\ y   # Compute IDCT
+ldiv!(x, plan, y)            # Compute IDCT (zero allocation)
 ```
 """
 struct DCTPlan{T, N}
@@ -170,6 +234,10 @@ struct DCTPlan{T, N}
     v_buffers::Dict{Tuple{Int, Int}, Any}
     V_buffers::Dict{Tuple{Int, Int}, Any}
     
+    # Temp buffer for ping-pong operations in mul!
+    # Only 1 buffer needed - output y is used as the other buffer
+    temp_buffer::Any
+    
     # Backend
     backend::Any
 end
@@ -184,6 +252,7 @@ Create a DCT plan for arrays with the same size and element type as `x`.
 x = rand(256, 256, 256)
 plan = plan_dct(x)
 y = plan * x   # DCT
+mul!(y, plan, x)  # DCT (zero allocation)
 x2 = plan \\ y  # IDCT
 ```
 """
@@ -228,8 +297,12 @@ function plan_dct(x::AbstractArray{T, N}) where {T <: Real, N}
         end
     end
     
+    # Create temp buffer for mul! ping-pong operations
+    # Only 1 buffer needed - output y acts as the second buffer
+    temp_buffer = similar(x)
+    
     return DCTPlan{T, N}(
-        dims, twiddles, twiddles_inv, fft_plans, ifft_plans, v_buffers, V_buffers, backend
+        dims, twiddles, twiddles_inv, fft_plans, ifft_plans, v_buffers, V_buffers, temp_buffer, backend
     )
 end
 
@@ -504,6 +577,235 @@ function Base.:\(plan::DCTPlan{T, 3}, y::AbstractArray{T, 3}) where T
     
     x = similar(t2_p)
     idct_batch_dim1!(reshape(x, N1, Batch1), reshape(t2_p, N1, Batch1), v_buf1, V_buf1, twiddles_inv1, ifft_plan1)
+    
+    return x
+end
+
+# ============================================================================
+# Zero-allocation mul! and ldiv! implementations
+# ============================================================================
+
+"""
+    LinearAlgebra.mul!(y, plan::DCTPlan{T, 3}, x) -> y
+
+Compute 3D DCT with zero allocation using ping-pong buffer strategy.
+Uses y and plan.temp_buffer alternately to avoid allocations.
+
+# Flow (ping-pong between buf and y):
+1. x    → DCT dim1 → buf     # buf = (1',2,3)
+2. buf  → perm(2,1,3) → y    # y   = (2,1',3)
+3. y    → DCT dim1 → buf     # buf = (2',1',3)
+4. buf  → perm(3,2,1) → y    # y   = (3,2',1')
+5. y    → DCT dim1 → buf     # buf = (3',2',1')
+6. buf  → perm(2,3,1) → y    # y   = (1',2',3') ✓
+"""
+function LinearAlgebra.mul!(y::AbstractArray{T, 3}, plan::DCTPlan{T, 3}, x::AbstractArray{T, 3}) where T
+    N1, N2, N3 = plan.dims
+    buf = plan.temp_buffer
+    
+    # Step 1: x → DCT dim1 → buf
+    Batch1 = N2 * N3
+    key1 = (N1, Batch1)
+    v_buf1 = plan.v_buffers[key1]
+    V_buf1 = plan.V_buffers[key1]
+    twiddles1 = plan.twiddles[N1]
+    fft_plan1 = plan.fft_plans[key1]
+    dct_batch_dim1!(reshape(buf, N1, Batch1), reshape(x, N1, Batch1), v_buf1, V_buf1, twiddles1, fft_plan1)
+    
+    # Step 2: buf → perm(2,1,3) → y
+    # After perm: (N2, N1, N3)
+    y_perm = reshape(y, (N2, N1, N3))
+    buf_orig = reshape(buf, (N1, N2, N3))
+    permutedims_3d!(y_perm, buf_orig, (2, 1, 3))
+    
+    # Step 3: y → DCT dim1 → buf (buf now shaped as (N2, N1, N3))
+    Batch2 = N1 * N3
+    key2 = (N2, Batch2)
+    v_buf2 = plan.v_buffers[key2]
+    V_buf2 = plan.V_buffers[key2]
+    twiddles2 = plan.twiddles[N2]
+    fft_plan2 = plan.fft_plans[key2]
+    buf_2 = reshape(buf, (N2, N1, N3))
+    dct_batch_dim1!(reshape(buf_2, N2, Batch2), reshape(y_perm, N2, Batch2), v_buf2, V_buf2, twiddles2, fft_plan2)
+    
+    # Step 4: buf → perm(3,2,1) → y
+    # From (N2, N1, N3) → (N3, N1, N2)
+    y_perm2 = reshape(y, (N3, N1, N2))
+    permutedims_3d!(y_perm2, buf_2, (3, 2, 1))
+    
+    # Step 5: y → DCT dim1 → buf (buf now shaped as (N3, N1, N2))
+    Batch3 = N1 * N2
+    key3 = (N3, Batch3)
+    v_buf3 = plan.v_buffers[key3]
+    V_buf3 = plan.V_buffers[key3]
+    twiddles3 = plan.twiddles[N3]
+    fft_plan3 = plan.fft_plans[key3]
+    buf_3 = reshape(buf, (N3, N1, N2))
+    dct_batch_dim1!(reshape(buf_3, N3, Batch3), reshape(y_perm2, N3, Batch3), v_buf3, V_buf3, twiddles3, fft_plan3)
+    
+    # Step 6: buf → perm(2,3,1) → y
+    # From (N3, N1, N2) → (N1, N2, N3) = final output shape
+    permutedims_3d!(y, buf_3, (2, 3, 1))
+    
+    return y
+end
+
+"""
+    LinearAlgebra.ldiv!(x, plan::DCTPlan{T, 3}, y) -> x
+
+Compute 3D IDCT with zero allocation using ping-pong buffer strategy.
+
+# Flow (reverse of DCT):
+1. y    → perm(3,1,2) → buf  # buf = (3',1',2')
+2. buf  → IDCT dim1 → x     # x   = (3,1',2')
+3. x    → perm(3,2,1) → buf  # buf = (2',1',3)
+4. buf  → IDCT dim1 → x     # x   = (2,1',3)
+5. x    → perm(2,1,3) → buf  # buf = (1',2,3)
+6. buf  → IDCT dim1 → x     # x   = (1,2,3) ✓
+"""
+function LinearAlgebra.ldiv!(x::AbstractArray{T, 3}, plan::DCTPlan{T, 3}, y::AbstractArray{T, 3}) where T
+    N1, N2, N3 = plan.dims
+    buf = plan.temp_buffer
+    
+    # Step 1: y → perm(3,1,2) → buf
+    # From (N1, N2, N3) → (N3, N1, N2)
+    buf_1 = reshape(buf, (N3, N1, N2))
+    permutedims_3d!(buf_1, y, (3, 1, 2))
+    
+    # Step 2: buf → IDCT dim1 → x
+    Batch3 = N1 * N2
+    key3 = (N3, Batch3)
+    v_buf3 = plan.v_buffers[key3]
+    V_buf3 = plan.V_buffers[key3]
+    twiddles_inv3 = plan.twiddles_inv[N3]
+    ifft_plan3 = plan.ifft_plans[key3]
+    x_1 = reshape(x, (N3, N1, N2))
+    idct_batch_dim1!(reshape(x_1, N3, Batch3), reshape(buf_1, N3, Batch3), v_buf3, V_buf3, twiddles_inv3, ifft_plan3)
+    
+    # Step 3: x → perm(3,2,1) → buf
+    # From (N3, N1, N2) → (N2, N1, N3)
+    buf_2 = reshape(buf, (N2, N1, N3))
+    permutedims_3d!(buf_2, x_1, (3, 2, 1))
+    
+    # Step 4: buf → IDCT dim1 → x
+    Batch2 = N1 * N3
+    key2 = (N2, Batch2)
+    v_buf2 = plan.v_buffers[key2]
+    V_buf2 = plan.V_buffers[key2]
+    twiddles_inv2 = plan.twiddles_inv[N2]
+    ifft_plan2 = plan.ifft_plans[key2]
+    x_2 = reshape(x, (N2, N1, N3))
+    idct_batch_dim1!(reshape(x_2, N2, Batch2), reshape(buf_2, N2, Batch2), v_buf2, V_buf2, twiddles_inv2, ifft_plan2)
+    
+    # Step 5: x → perm(2,1,3) → buf
+    # From (N2, N1, N3) → (N1, N2, N3)
+    buf_3 = reshape(buf, (N1, N2, N3))
+    permutedims_3d!(buf_3, x_2, (2, 1, 3))
+    
+    # Step 6: buf → IDCT dim1 → x
+    Batch1 = N2 * N3
+    key1 = (N1, Batch1)
+    v_buf1 = plan.v_buffers[key1]
+    V_buf1 = plan.V_buffers[key1]
+    twiddles_inv1 = plan.twiddles_inv[N1]
+    ifft_plan1 = plan.ifft_plans[key1]
+    idct_batch_dim1!(reshape(x, N1, Batch1), reshape(buf_3, N1, Batch1), v_buf1, V_buf1, twiddles_inv1, ifft_plan1)
+    
+    return x
+end
+
+# 1D and 2D mul!/ldiv! - simpler versions
+function LinearAlgebra.mul!(y::AbstractVector{T}, plan::DCTPlan{T, 1}, x::AbstractVector{T}) where T
+    N = plan.dims[1]
+    Batch = 1
+    key = (N, Batch)
+    
+    v_buf = plan.v_buffers[key]
+    V_buf = plan.V_buffers[key]
+    twiddles = plan.twiddles[N]
+    fft_plan = plan.fft_plans[key]
+    
+    dct_batch_dim1!(reshape(y, N, 1), reshape(x, N, 1), v_buf, V_buf, twiddles, fft_plan)
+    return y
+end
+
+function LinearAlgebra.ldiv!(x::AbstractVector{T}, plan::DCTPlan{T, 1}, y::AbstractVector{T}) where T
+    N = plan.dims[1]
+    Batch = 1
+    key = (N, Batch)
+    
+    v_buf = plan.v_buffers[key]
+    V_buf = plan.V_buffers[key]
+    twiddles_inv = plan.twiddles_inv[N]
+    ifft_plan = plan.ifft_plans[key]
+    
+    idct_batch_dim1!(reshape(x, N, 1), reshape(y, N, 1), v_buf, V_buf, twiddles_inv, ifft_plan)
+    return x
+end
+
+function LinearAlgebra.mul!(y::AbstractMatrix{T}, plan::DCTPlan{T, 2}, x::AbstractMatrix{T}) where T
+    N1, N2 = plan.dims
+    buf = plan.temp_buffer
+    
+    # Step 1: x → DCT dim1 → buf
+    Batch1 = N2
+    key1 = (N1, Batch1)
+    v_buf1 = plan.v_buffers[key1]
+    V_buf1 = plan.V_buffers[key1]
+    twiddles1 = plan.twiddles[N1]
+    fft_plan1 = plan.fft_plans[key1]
+    dct_batch_dim1!(reshape(buf, N1, Batch1), reshape(x, N1, Batch1), v_buf1, V_buf1, twiddles1, fft_plan1)
+    
+    # Step 2: buf → perm(2,1) → y
+    y_perm = reshape(y, (N2, N1))
+    permutedims_2d!(y_perm, buf)
+    
+    # Step 3: y → DCT dim1 → buf
+    Batch2 = N1
+    key2 = (N2, Batch2)
+    v_buf2 = plan.v_buffers[key2]
+    V_buf2 = plan.V_buffers[key2]
+    twiddles2 = plan.twiddles[N2]
+    fft_plan2 = plan.fft_plans[key2]
+    buf_2 = reshape(buf, (N2, N1))
+    dct_batch_dim1!(reshape(buf_2, N2, Batch2), reshape(y_perm, N2, Batch2), v_buf2, V_buf2, twiddles2, fft_plan2)
+    
+    # Step 4: buf → perm(2,1) → y
+    permutedims_2d!(y, buf_2)
+    
+    return y
+end
+
+function LinearAlgebra.ldiv!(x::AbstractMatrix{T}, plan::DCTPlan{T, 2}, y::AbstractMatrix{T}) where T
+    N1, N2 = plan.dims
+    buf = plan.temp_buffer
+    
+    # Step 1: y → perm(2,1) → buf
+    buf_1 = reshape(buf, (N2, N1))
+    permutedims_2d!(buf_1, y)
+    
+    # Step 2: buf → IDCT dim1 → x
+    Batch2 = N1
+    key2 = (N2, Batch2)
+    v_buf2 = plan.v_buffers[key2]
+    V_buf2 = plan.V_buffers[key2]
+    twiddles_inv2 = plan.twiddles_inv[N2]
+    ifft_plan2 = plan.ifft_plans[key2]
+    x_1 = reshape(x, (N2, N1))
+    idct_batch_dim1!(reshape(x_1, N2, Batch2), reshape(buf_1, N2, Batch2), v_buf2, V_buf2, twiddles_inv2, ifft_plan2)
+    
+    # Step 3: x → perm(2,1) → buf
+    buf_2 = reshape(buf, (N1, N2))
+    permutedims_2d!(buf_2, x_1)
+    
+    # Step 4: buf → IDCT dim1 → x
+    Batch1 = N2
+    key1 = (N1, Batch1)
+    v_buf1 = plan.v_buffers[key1]
+    V_buf1 = plan.V_buffers[key1]
+    twiddles_inv1 = plan.twiddles_inv[N1]
+    ifft_plan1 = plan.ifft_plans[key1]
+    idct_batch_dim1!(reshape(x, N1, Batch1), reshape(buf_2, N1, Batch1), v_buf1, V_buf1, twiddles_inv1, ifft_plan1)
     
     return x
 end

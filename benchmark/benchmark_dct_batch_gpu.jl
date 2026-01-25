@@ -102,6 +102,36 @@ println("  Maximum time:  $(round(maximum(times_dct_plan), digits=3)) ms")
 println()
 
 # ============================================================================
+# Benchmark mul!(y, plan, x) - zero allocation with ping-pong buffers
+# ============================================================================
+println("-"^60)
+println("Benchmarking mul!(y, plan, x) (zero allocation)...")
+println("-"^60)
+
+using LinearAlgebra: mul!, ldiv!
+y_preallocated = similar(x_gpu)
+
+# Benchmark mul! - this should be the fastest since it reuses output buffer
+times_mul = Float64[]
+for _ in 1:3  # Warmup
+    mul!(y_preallocated, dct_plan, x_gpu)
+    CUDA.synchronize()
+end
+for _ in 1:20
+    CUDA.synchronize()
+    t0 = time_ns()
+    mul!(y_preallocated, dct_plan, x_gpu)
+    CUDA.synchronize()
+    t1 = time_ns()
+    push!(times_mul, (t1 - t0) / 1e6)
+end
+println("  Minimum time:  $(round(minimum(times_mul), digits=3)) ms")
+println("  Median time:   $(round(median(times_mul), digits=3)) ms")
+println("  Mean time:     $(round(mean(times_mul), digits=3)) ms")
+println("  Maximum time:  $(round(maximum(times_mul), digits=3)) ms")
+println()
+
+# ============================================================================
 # Benchmark idct with plan (plan \ y)
 # ============================================================================
 println("-"^60)
@@ -114,6 +144,33 @@ println("  Minimum time:  $(round(minimum(times_idct_plan), digits=3)) ms")
 println("  Median time:   $(round(median(times_idct_plan), digits=3)) ms")
 println("  Mean time:     $(round(mean(times_idct_plan), digits=3)) ms")
 println("  Maximum time:  $(round(maximum(times_idct_plan), digits=3)) ms")
+println()
+
+# ============================================================================
+# Benchmark ldiv!(x, plan, y) - zero allocation IDCT
+# ============================================================================
+println("-"^60)
+println("Benchmarking ldiv!(x, plan, y) (zero allocation IDCT)...")
+println("-"^60)
+
+x_preallocated = similar(x_gpu)
+times_ldiv = Float64[]
+for _ in 1:3  # Warmup
+    ldiv!(x_preallocated, dct_plan, y_gpu)
+    CUDA.synchronize()
+end
+for _ in 1:20
+    CUDA.synchronize()
+    t0 = time_ns()
+    ldiv!(x_preallocated, dct_plan, y_gpu)
+    CUDA.synchronize()
+    t1 = time_ns()
+    push!(times_ldiv, (t1 - t0) / 1e6)
+end
+println("  Minimum time:  $(round(minimum(times_ldiv), digits=3)) ms")
+println("  Median time:   $(round(median(times_ldiv), digits=3)) ms")
+println("  Mean time:     $(round(mean(times_ldiv), digits=3)) ms")
+println("  Maximum time:  $(round(maximum(times_ldiv), digits=3)) ms")
 println()
 
 # ============================================================================
@@ -139,14 +196,18 @@ println("="^60)
 
 ratio_dct = median(times_dct) / median(times_rfft)
 ratio_dct_plan = median(times_dct_plan) / median(times_rfft)
+ratio_mul = median(times_mul) / median(times_rfft)
 speedup_plan = median(times_dct) / median(times_dct_plan)
+speedup_mul = median(times_dct) / median(times_mul)
 
 println()
 println("  cuFFT rfft median:           $(round(median(times_rfft), digits=3)) ms (baseline)")
 println("  dct_fast median:             $(round(median(times_dct), digits=3)) ms ($(round(ratio_dct, digits=2))x slower)")
 println("  plan * x median:             $(round(median(times_dct_plan), digits=3)) ms ($(round(ratio_dct_plan, digits=2))x slower)")
+println("  mul!(y, plan, x) median:     $(round(median(times_mul), digits=3)) ms ($(round(ratio_mul, digits=2))x slower)")
 println()
 println("  Speedup from plan caching:   $(round(speedup_plan, digits=2))x faster")
+println("  Speedup from mul! (zero-alloc): $(round(speedup_mul, digits=2))x faster")
 println()
 
 # ============================================================================
@@ -296,20 +357,22 @@ println("Summary")
 println("="^60)
 println()
 println("Performance Results:")
-println("  • cuFFT rfft (3D):      $(round(median(times_rfft), digits=3)) ms (baseline)")
-println("  • dct_fast (no plan):   $(round(median(times_dct), digits=3)) ms ($(round(ratio_dct, digits=2))x slower)")
-println("  • plan * x (cached):    $(round(median(times_dct_plan), digits=3)) ms ($(round(ratio_dct_plan, digits=2))x slower)")
+println("  • cuFFT rfft (3D):        $(round(median(times_rfft), digits=3)) ms (baseline)")
+println("  • dct_fast (no plan):     $(round(median(times_dct), digits=3)) ms ($(round(ratio_dct, digits=2))x slower)")
+println("  • plan * x (cached):      $(round(median(times_dct_plan), digits=3)) ms ($(round(ratio_dct_plan, digits=2))x slower)")
+println("  • mul!(y,plan,x) (zero):  $(round(median(times_mul), digits=3)) ms ($(round(ratio_mul, digits=2))x slower)")
 println()
-println("Plan Caching Benefits:")
-println("  • Speedup:              $(round(speedup_plan, digits=2))x faster with cached plan")
-println("  • Plan creation:        $(round(plan_creation_time, digits=3)) ms (one-time cost)")
+println("Optimization Benefits:")
+println("  • Plan caching speedup:   $(round(speedup_plan, digits=2))x faster vs dct_fast")
+println("  • Zero-alloc speedup:     $(round(speedup_mul, digits=2))x faster vs dct_fast")
+println("  • Plan creation:          $(round(plan_creation_time, digits=3)) ms (one-time cost)")
 println()
 
-if ratio_dct_plan > 10
+if ratio_mul > 10
     println("⚠️  Significant performance gap vs cuFFT. Consider:")
     println("   - Using multi-dimensional rfft to reduce overhead")
     println("   - Fusing kernels to reduce memory bandwidth")
-elseif ratio_dct_plan > 3
+elseif ratio_mul > 3
     println("⚠️  Moderate performance gap vs cuFFT. This is expected due to:")
     println("   - Separable 1D approach requiring 3x rfft + 4x permutedims")
     println("   - Additional pre/post processing for DCT normalization")
@@ -317,3 +380,4 @@ else
     println("✓  Performance is within acceptable range.")
 end
 println()
+
