@@ -5,8 +5,12 @@ DocMeta.setdocmeta!(AcceleratedDCTs, :DocTestSetup, :(using AcceleratedDCTs); re
 
 # Add titles of sections and overrides page titles
 const titles = Dict(
-    # "10-tutorials" => "Tutorials", # example folder title
-    "91-developer.md" => "Developer docs",
+    "10-tutorial.md" => "Tutorial",
+    "20-theory.md" => "Theory",
+    "30-implementation.md" => "Implementation",
+    "40-benchmarks.md" => "Benchmarks",
+    "50-troubleshooting.md" => "Troubleshooting",
+    "95-reference.md" => "Reference",
 )
 
 function recursively_list_pages(folder; path_prefix="")
@@ -60,11 +64,11 @@ end
 
 makedocs(;
     modules = [AcceleratedDCTs],
-    authors = "lyx",
-    repo = "https://github.com/lyx/AcceleratedDCTs.jl/blob/{commit}{path}#{line}",
+    authors = "Yixin Liu (liuyxpp)",
+    repo = Remotes.GitHub("liuyxpp", "AcceleratedDCTs.jl"),
     sitename = "AcceleratedDCTs.jl",
-    format = Documenter.HTML(; canonical = "https://lyx.github.io/AcceleratedDCTs.jl"),
+    format = Documenter.HTML(; canonical = "https://yxliu.group/AcceleratedDCTs.jl"),
     pages = list_pages(),
 )
 
-deploydocs(; repo = "github.com/lyx/AcceleratedDCTs.jl")
+deploydocs(; repo = "github.com/liuyxpp/AcceleratedDCTs.jl", devbranch = "main")
