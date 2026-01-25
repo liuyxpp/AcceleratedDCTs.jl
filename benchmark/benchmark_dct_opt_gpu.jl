@@ -10,6 +10,8 @@
 using CUDA
 using CUDA.CUFFT
 using Statistics
+using Printf
+using LinearAlgebra
 
 # Add the src directory to the load path
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
@@ -21,36 +23,10 @@ println("Benchmark: 3D DCT (Algorithm 3) vs dct_fast vs cuFFT (GPU)")
 println("="^60)
 println()
 
-# Setup
-N = 256
-println("Grid size: $(N)x$(N)x$(N)")
 
-# Check available memory
-free_mem, total_mem = CUDA.Mem.info()
-input_size_mb = (N^3 * 8) / 1024^2
-println("Input array size: $(round(input_size_mb, digits=2)) MiB")
-println("Free GPU Memory: $(round(free_mem/1024^2, digits=2)) MiB / $(round(total_mem/1024^2, digits=2)) MiB")
-println("GPU: $(CUDA.name(CUDA.device()))")
-println()
-
-# Check if we assume we might OOM immediately
-if input_size_mb * 6 > free_mem / 1024^2
-    println("WARNING: Detailed benchmarks might OOM due to limited memory.")
-    println("Estimated peak memory usage > $(round(input_size_mb*6, digits=2)) MiB")
-end
-
-println("Allocating input...")
-x_cpu = rand(Float64, N, N, N)
-x_gpu = CuArray(x_cpu)
-println("Input allocated.")
-println()
 
 # Helper for robust benchmarking
 function safe_benchmark(name, f, x; n_warmup=2, n_samples=10)
-    println("-"^60)
-    println("Benchmarking $name...")
-    println("-"^60)
-    
     # Aggressive Cleanup before start
     GC.gc()
     CUDA.reclaim()
@@ -78,7 +54,6 @@ function safe_benchmark(name, f, x; n_warmup=2, n_samples=10)
     times = Float64[]
     try
         for i in 1:n_samples
-            # Aggressive cleanup between samples to survive tight memory conditions
             if i > 1
                 GC.gc()
                 CUDA.reclaim()
@@ -93,16 +68,6 @@ function safe_benchmark(name, f, x; n_warmup=2, n_samples=10)
             print(".") 
         end
         println() # Newline after dots
-        
-        # Report
-        min_t = minimum(times)
-        med_t = median(times)
-        max_t = maximum(times)
-        
-        println("  Minimum time:  $(round(min_t, digits=3)) ms")
-        println("  Median time:   $(round(med_t, digits=3)) ms")
-        println("  Maximum time:  $(round(max_t, digits=3)) ms")
-        
         return times
     catch e
         if isa(e, CUDA.OutOfMemoryError)
@@ -116,56 +81,73 @@ function safe_benchmark(name, f, x; n_warmup=2, n_samples=10)
     end
 end
 
-# 1. Benchmark dct_3d_opt (No Plan Reuse)
-println("Description: 3D DCT (Algorithm 3) - Plan creation + Execution")
-times_dct_opt = safe_benchmark("dct_3d_opt (One-shot)", dct_3d_opt, x_gpu)
+# Sizes to benchmark
+Ns = [16, 32, 64, 128, 256]
+results = []
+
+println("Benchmarking sizes: $Ns")
 println()
 
-# 1b. Benchmark dct_3d_opt (With Plan Reuse)
-println("Description: 3D DCT (Algorithm 3) - Precomputed Plan (Execution Only)")
-p = plan_dct_opt(x_gpu) # Precompute plan
-times_dct_opt_plan = safe_benchmark("dct_3d_opt (Cached Plan)", x -> p * x, x_gpu)
+# Check total GPU memory once
+free_mem, total_mem = CUDA.Mem.info()
+println("Free GPU Memory: $(round(free_mem/1024^2, digits=2)) MiB / $(round(total_mem/1024^2, digits=2)) MiB")
+println("GPU: $(CUDA.name(CUDA.device()))")
 println()
 
-# 2. Benchmark dct_fast
-println("Description: 3x Separable 1D DCTs (Batched)")
-times_dct_fast = safe_benchmark("dct_fast", dct_fast, x_gpu)
-println()
+for N in Ns
+    println("="^60)
+    println("Running Benchmark for N = $N ($N x $N x $N)")
+    println("="^60)
+    
+    # Alloc Input
+    x_cpu = rand(Float64, N, N, N)
+    x_gpu = CuArray(x_cpu)
+    y_gpu = similar(x_gpu)
+    
+    # Alloc RFFT Output
+    dims = size(x_gpu)
+    cdims = ntuple(i -> ifelse(i == 1, dims[1] ÷ 2 + 1, dims[i]), 3)
+    y_complex_gpu = CUDA.zeros(ComplexF64, cdims...)
+    
+    # Warmup / Pre-plan
+    p = plan_dct_opt(x_gpu)
+    p_rfft = plan_rfft(x_gpu)
+    
+    # Measure cuFFT (Baseline - mul!)
+    # Using small n_samples for stability across many sizes
+    times_rfft = safe_benchmark("cuFFT rfft (mul!)", x -> mul!(y_complex_gpu, p_rfft, x), x_gpu; n_samples=5)
+    t_rfft = isempty(times_rfft) || isnan(times_rfft[1]) ? NaN : median(times_rfft)
+    
+    # Measure Optimized DCT (Plan - mul!)
+    times_opt = safe_benchmark("Opt DCT (Algorithm 3) w/ mul!", x -> mul!(y_gpu, p, x), x_gpu; n_samples=5)
+    t_opt = isempty(times_opt) || isnan(times_opt[1]) ? NaN : median(times_opt)
+    
+    # Measure Batched DCT (Allocating)
+    times_batched = safe_benchmark("Batched DCT", dct_fast, x_gpu; n_samples=5)
+    t_batched = isempty(times_batched) || isnan(times_batched[1]) ? NaN : median(times_batched)
 
-# 3. Benchmark cuFFT
-println("Description: cuFFT R2C 3D FFT (Baseline)")
-times_rfft = safe_benchmark("cuFFT rfft", rfft, x_gpu)
-println()
-
-# Comparison
-println("="^60)
-println("Performance Comparison (using median times)")
-println("="^60)
-
-if !isnan(times_rfft[1])
-    baseline = median(times_rfft)
-    println("Baselines:")
-    println("  cuFFT rfft:              $(round(baseline, digits=3)) ms")
+    push!(results, (N, t_rfft, t_opt, t_batched))
+    
+    # Cleanup between sizes
+    x_gpu = nothing
+    y_gpu = nothing
+    y_complex_gpu = nothing
+    p = nothing
+    p_rfft = nothing
+    GC.gc()
+    CUDA.reclaim()
     println()
-    
-    println("DCT Variants:")
-    if !isnan(times_dct_opt[1])
-        t_opt = median(times_dct_opt)
-        t_opt_p = median(times_dct_opt_plan)
-        println("  dct_3d_opt (One-shot):   $(round(t_opt, digits=3)) ms ($(round(t_opt/baseline, digits=2))x slower vs FFT)")
-        println("  dct_3d_opt (Plan):       $(round(t_opt_p, digits=3)) ms ($(round(t_opt_p/baseline, digits=2))x slower vs FFT)")
-        println("     -> Plan Speedup:      $(round(t_opt/t_opt_p, digits=2))x improvement from caching")
-    else
-        println("  dct_3d_opt:              OOM / FAILED")
-    end
-    
-    if !isnan(times_dct_fast[1])
-        t_fast = median(times_dct_fast)
-        println("  dct_fast (Batched):      $(round(t_fast, digits=3)) ms ($(round(t_fast/baseline, digits=2))x slower vs FFT)")
-    else
-        println("  dct_fast (Batched):      OOM / FAILED")
-    end
-else
-    println("Baseline (cuFFT) failed. Cannot compare.")
 end
-println()
+
+println("="^80)
+println("GPU Performance Summary (Time in ms)")
+println("="^80)
+println("| Grid Size | cuFFT rfft | Opt 3D DCT | Batched DCT |")
+println("|-----------|------------|------------|-------------|")
+for (N, t_rfft, t_opt, t_batched) in results
+    # Format: N^3 | rfft | opt | batched
+    @printf("| %3d^3     | %10.3f | %10.3f | %11.3f |\n", 
+            N, t_rfft, t_opt, t_batched)
+end
+println("="^80)
+

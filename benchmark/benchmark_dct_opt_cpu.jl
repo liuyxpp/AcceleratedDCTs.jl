@@ -10,43 +10,13 @@
 using FFTW
 using Statistics
 using LinearAlgebra
+using Printf
 
 # Add the src directory to the load path
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 
 using AcceleratedDCTs
 
-println("="^60)
-println("Benchmark: 3D DCT (Algorithm 3) w/ Plan vs dct_fast vs FFTW rfft (CPU)")
-println("="^60)
-println()
-
-# Setup
-N = 256
-x_cpu = rand(Float64, N, N, N)
-
-println("Grid size: $(N)x$(N)x$(N)")
-println("Input array size: $(size(x_cpu))")
-println("Input array type: $(typeof(x_cpu))")
-println("CPU threads: $(Threads.nthreads())")
-println("FFTW threads: $(FFTW.get_num_threads())")
-println()
-
-# Set FFTW to use multiple threads if available
-FFTW.set_num_threads(Threads.nthreads())
-println("Set FFTW threads to: $(FFTW.get_num_threads())")
-println()
-
-# Warmup
-println("Warming up...")
-p = plan_dct_opt(x_cpu)
-_ = p * x_cpu
-_ = dct_3d_opt(x_cpu)
-_ = dct_fast(x_cpu)
-_ = FFTW.dct(x_cpu)
-_ = rfft(x_cpu)
-println("Warmup complete.")
-println()
 
 # Benchmark function for CPU
 function benchmark_cpu(f, x; n_warmup=3, n_samples=10)
@@ -67,100 +37,76 @@ function benchmark_cpu(f, x; n_warmup=3, n_samples=10)
     return times
 end
 
-# ============================================================================
-# Benchmark dct_3d_opt (Algorithm 3)
-# ============================================================================
-println("-"^60)
-println("Benchmarking dct_3d_opt (Algorithm 3)...")
-println("Description: Manual 3D RFFT wrapper with recursive post-processing")
-println("-"^60)
+# Sizes to benchmark
+Ns = [16, 32, 64, 128, 256]
+results = []
 
-# 1a. One-shot
-println("Type: One-shot (dct_3d_opt)")
-times_dct_opt = benchmark_cpu(dct_3d_opt, x_cpu)
-println("  Median time:   $(round(median(times_dct_opt), digits=3)) ms")
+println("Benchmarking sizes: $Ns")
 println()
 
-# 1b. Plan-based
-println("Type: Plan-based (p * x)")
-p_cpu = plan_dct_opt(x_cpu)
-times_dct_opt_plan = benchmark_cpu(x -> p_cpu * x, x_cpu)
-println("  Median time:   $(round(median(times_dct_opt_plan), digits=3)) ms")
-println()
-
-
-# ============================================================================
-# Benchmark dct_fast (Batched Separable)
-# ============================================================================
-println("-"^60)
-println("Benchmarking dct_fast (Batched Separable, no plan reuse)...")
-println("Description: 3x Separable 1D DCTs using batched kernels + transposes")
-println("-"^60)
-
-times_dct_fast = benchmark_cpu(dct_fast, x_cpu)
-println("  Median time:   $(round(median(times_dct_fast), digits=3)) ms")
-println()
-
-# ============================================================================
-# Benchmark FFTW rfft (3D)
-# ============================================================================
-println("-"^60)
-println("Benchmarking FFTW rfft (3D R2C FFT)...")
-println("Description: Native highly-optimized FFT library")
-println("-"^60)
-
-times_rfft = benchmark_cpu(rfft, x_cpu)
-println("  Median time:   $(round(median(times_rfft), digits=3)) ms")
-println()
-
-# ============================================================================
-# Benchmark FFTW dct (REDFT10)
-# ============================================================================
-println("-"^60)
-println("Benchmarking FFTW dct (REDFT10)...")
-println("Description: FFTW native DCT-II implementation")
-println("-"^60)
-
-# FFTW dct default is along all dims if not specified, but safe to verify
-times_fftw_dct = benchmark_cpu(x -> FFTW.dct(x), x_cpu)
-println("  Median time:   $(round(median(times_fftw_dct), digits=3)) ms")
-println()
-
-# ============================================================================
-# Performance Comparison Summary
-# ============================================================================
-println("="^60)
-println("Performance Comparison (using median times)")
-println("="^60)
-
-baseline = median(times_rfft)
-time_opt = median(times_dct_opt)
-time_opt_plan = median(times_dct_opt_plan)
-time_fast = median(times_dct_fast)
-time_fftw_dct = median(times_fftw_dct)
-
-ratio_opt = time_opt / baseline
-ratio_opt_plan = time_opt_plan / baseline
-ratio_fast = time_fast / baseline
-speedup_plan = time_opt / time_opt_plan
-
-println()
-println("Baselines:")
-println("  FFTW rfft:               $(round(baseline, digits=3)) ms")
-println("  FFTW dct (REDFT10):      $(round(time_fftw_dct, digits=3)) ms ($(round(time_fftw_dct/baseline, digits=2))x slower vs FFT)")
-println()
-println("DCT Variants:")
-println("  dct_3d_opt (One-shot):   $(round(time_opt, digits=3)) ms ($(round(ratio_opt, digits=2))x slower vs FFT)")
-println("  dct_3d_opt (Plan):       $(round(time_opt_plan, digits=3)) ms ($(round(ratio_opt_plan, digits=2))x slower vs FFT)")
-println("     -> Plan Speedup:      $(round(speedup_plan, digits=2))x improvement")
-println("  dct_fast (Batched):       $(round(time_fast, digits=3)) ms ($(round(ratio_fast, digits=2))x slower vs FFT)")
-println()
-println("Comparison:")
-if time_opt_plan < time_fast
-    speedup = time_fast / time_opt_plan
-    println("  • Algorithm 3 (Plan) is $(round(speedup, digits=2))x FASTER than dct_fast")
-else
-    speedup = time_opt_plan / time_fast
-    println("  • Algorithm 3 (Plan) is $(round(speedup, digits=2))x SLOWER than dct_fast")
+for N in Ns
+    println("="^60)
+    println("Running Benchmark for N = $N ($N x $N x $N)")
+    println("="^60)
+    
+    # Alloc Input/Output
+    x_cpu = rand(Float64, N, N, N)
+    y_cpu = similar(x_cpu)
+    
+    # Alloc RFFT Output
+    dims = size(x_cpu)
+    cdims = ntuple(i -> ifelse(i == 1, dims[1] ÷ 2 + 1, dims[i]), 3)
+    y_complex = Array{ComplexF64}(undef, cdims)
+    
+    # Create Plans
+    p_opt = plan_dct_opt(x_cpu)
+    p_rfft = plan_rfft(x_cpu)
+    p_fftw_dct = FFTW.plan_dct(x_cpu)
+    
+    # Measure RFFT (mul!)
+    print("  FFTW rfft (mul!)... ")
+    times_rfft = benchmark_cpu(x -> mul!(y_complex, p_rfft, x), x_cpu; n_samples=5)
+    t_rfft = median(times_rfft)
+    println("Done ($t_rfft ms)")
+    
+    # Measure FFTW DCT (mul!)
+    print("  FFTW dct (mul!)... ")
+    times_fftw = benchmark_cpu(x -> mul!(y_cpu, p_fftw_dct, x), x_cpu; n_samples=5)
+    t_fftw = median(times_fftw)
+    println("Done ($t_fftw ms)")
+    
+    # Measure Optimized DCT (mul!)
+    print("  Opt DCT (mul!)... ")
+    times_opt = benchmark_cpu(x -> mul!(y_cpu, p_opt, x), x_cpu; n_samples=5)
+    t_opt = median(times_opt)
+    println("Done ($t_opt ms)")
+    
+    # Measure Batched DCT (Allocating - No mul! support)
+    print("  Batched DCT... ")
+    times_batched = benchmark_cpu(dct_fast, x_cpu; n_samples=5)
+    t_batched = median(times_batched)
+    println("Done ($t_batched ms)")
+    
+    padding = false # Placeholder
+    push!(results, (N, t_rfft, t_opt, t_batched, t_fftw))
+    
+    # Cleanup
+    p_opt = nothing
+    p_rfft = nothing
+    p_fftw_dct = nothing
+    GC.gc()
+    println()
 end
-println()
+
+println("="^80)
+println("CPU Performance Summary (Time in ms)")
+println("="^80)
+println("| Grid Size | FFTW rfft | FFTW dct | Opt 3D DCT | Batched DCT |")
+println("|-----------|-----------|----------|------------|-------------|")
+for (N, t_rfft, t_opt, t_batched, t_fftw) in results
+    # Format: N^3 | rfft | fftw_dct | opt | batched
+    @printf("| %3d^3     | %9.3f | %8.3f | %10.3f | %11.3f |\n", 
+            N, t_rfft, t_fftw, t_opt, t_batched)
+end
+println("="^80)
+
