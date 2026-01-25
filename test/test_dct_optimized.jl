@@ -56,19 +56,25 @@ using Statistics
         @test all(isapprox.(ratio, 4.0, atol=1e-5))
     end
     
-    @testset "Energy Conservation (Parseval-like)" begin
-        # Standard DCT is orthogonal (energy preserving) if normalized
-        # Our dct_2d_opt is not normalized (scaled by 4)
-        # Our idct_2d_opt is scaled by 0.25
-        # Let's check the specific scaling relation
+    @testset "Optimized 3D DCT (Algorithm 3)" begin
+        @testset "Roundtrip Accuracy" begin
+            sizes = [(4, 4, 4), (8, 8, 8), (4, 8, 4)]
+            for sz in sizes
+                x = rand(sz...)
+                y = dct_3d_opt(x)
+                x_rec = idct_3d_opt(y)
+                @test x_rec ≈ x atol=1e-13
+            end
+        end
         
-        N1, N2 = 8, 8
-        x = rand(N1, N2)
-        y = dct_2d_opt(x)
-        
-        # Verify specific energy relationship if needed, 
-        # otherwise roundtrip test covers the core correctness.
-        # Just ensuring it runs without error.
-        @test true 
+        @testset "Consistency with Reference DCT" begin
+             # 2D has factor 4. 3D should have factor 8?
+             N1, N2, N3 = 4, 4, 4
+             x = rand(N1, N2, N3)
+             y_ref = dct3d(x)
+             y_opt = dct_3d_opt(x)
+             ratio = y_opt ./ y_ref
+             @test all(isapprox.(ratio, 8.0, atol=1e-5))
+        end
     end
 end
