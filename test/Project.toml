@@ -1,9 +1,10 @@
 [deps]
 AcceleratedDCTs = "16e42a1c-b1d1-5566-807a-fe3b9ee7f6e1"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
-TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
+TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
 
 [sources]
 AcceleratedDCTs = {path = ".."}
