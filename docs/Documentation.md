@@ -59,7 +59,7 @@ We strictly avoid "scalar indexing" (accessing single elements from the host), e
 
 ### 3.2 Plan-Based API (AbstractFFTs)
 To maximize performance, we separate **resource allocation** (cheap on CPU, expensive on GPU) from **execution**.
-*   **`plan_dct_opt(x)`**:
+*   **`plan_dct(x)`**:
     *   Allocates temporary buffers (`tmp_real`, `tmp_comp`).
     *   Creates an internal FFT plan (`plan_rfft`).
     *   Pre-calculates twiddle factors (`cispi(...)`) on the device.
@@ -75,11 +75,11 @@ Measured on **NVIDIA RTX 2080 Ti**, grid size **384x384x384**.
 
 | Implementation | Description | Time | Speedup vs Batched |
 | :--- | :--- | :--- | :--- |
-| **`dct_3d_opt`** | **This Package (Algorithm 3)** | **42 ms** | **1.8x** |
-| `dct_fast` | Batched 1D Separable (Reference) | 77 ms | 1.0x |
+| **`Opt 3D DCT`** | **This Package (Algorithm 3) `dct`** | **42 ms** | **1.8x** |
+| `dct_batched` | Batched 1D Separable (Reference) | 77 ms | 1.0x |
 | `cuFFT rfft` | Theoretical Lower Bound (FFT only) | 26 ms | - |
 
-On CPU (Single Thread 128^3), `dct_3d_opt` is **~2.5x faster** than the batched approach.
+On CPU (Single Thread 128^3), `dct` is **~2.5x faster** than the batched approach.
 
 ---
 
@@ -87,26 +87,29 @@ On CPU (Single Thread 128^3), `dct_3d_opt` is **~2.5x faster** than the batched 
 
 ### 5.1 Plan Creation
 
-#### `plan_dct_opt(x::AbstractArray, region=1:ndims(x))`
+#### `plan_dct(x::AbstractArray, region=1:ndims(x))`
 Creates an optimized DCT-II plan.
 *   **x**: Input array (CPU Array or CuArray).
-*   **Returns**: `DCTOptPlan`.
+*   **Returns**: `DCTPlan`.
 
-#### `plan_idct_opt(x::AbstractArray, region=1:ndims(x))`
+#### `plan_idct(x::AbstractArray, region=1:ndims(x))`
 Creates an optimized IDCT-III plan.
-*   **Returns**: `IDCTOptPlan`.
+*   **Returns**: `IDCTPlan`.
 
 ### 5.2 Execution
 
 #### `*(plan, x)`
 Computes the transform, allocating a new output array.
 ```julia
+using AcceleratedDCTs: plan_dct
+p = plan_dct(x)
 y = p * x
 ```
 
 #### `mul!(y, plan, x)`
 Computes the transform in-place (updates `y`), utilizing pre-allocated plan buffers. **Zero allocation.**
 ```julia
+using LinearAlgebra: mul!
 mul!(y, p, x)
 ```
 
@@ -117,7 +120,6 @@ x_rec = p \ y
 ```
 
 ### 5.3 Convenience Functions
-*   `dct_2d_opt(x)` / `idct_2d_opt(x)`
-*   `dct_3d_opt(x)` / `idct_3d_opt(x)`
+*   `dct(x)` / `idct(x)`
 
-*Note: These functions create a new plan every call. Use `plan_dct_opt` for loops.*
+*Note: These functions create a new plan every call. Use `plan_dct` for loops.*

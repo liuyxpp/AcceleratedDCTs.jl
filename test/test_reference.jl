@@ -1,5 +1,6 @@
 using Test
 using AcceleratedDCTs
+using AcceleratedDCTs: dct1d, idct1d, dct2d, idct2d, dct3d, idct3d
 using LinearAlgebra
 
 @testset "Reference Independent Implementation (FFT-based)" begin

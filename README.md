@@ -30,7 +30,7 @@ Pkg.add(url="https://github.com/liuyxpp/AcceleratedDCTs.jl")
 ### Basic Usage
 
 ```julia
-using AcceleratedDCTs
+using AcceleratedDCTs: plan_dct, mul!
 using CUDA
 
 # 1. Create Data
@@ -38,7 +38,7 @@ N = 128
 x_gpu = CUDA.rand(Float64, N, N, N)
 
 # 2. Create Optimized Plan (Recommended)
-p = plan_dct_opt(x_gpu)
+p = plan_dct(x_gpu)
 
 # 3. Execute
 y = p * x_gpu           # Standard execution
@@ -56,8 +56,10 @@ mul!(x_rec, inv_p, y)
 For convenience (slower due to plan creation overhead):
 
 ```julia
-y = dct_3d_opt(x_gpu)
-x_rec = idct_3d_opt(y)
+using AcceleratedDCTs: dct, idct
+
+y = dct(x_gpu)
+x_rec = idct(y)
 ```
 
 ## Benchmarks

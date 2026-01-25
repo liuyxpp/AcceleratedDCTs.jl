@@ -7,13 +7,6 @@
 # - Device agnostic via KernelAbstractions.jl
 # - Optimized with plan caching, buffer reuse, and precomputed twiddles
 
-using KernelAbstractions
-using AbstractFFTs
-using LinearAlgebra
-
-export dct_fast, idct_fast
-export DCTPlan, plan_dct
-
 # ============================================================================
 # Batched 1D DCT/IDCT Kernels (operate on first dimension)
 # ============================================================================
@@ -196,9 +189,9 @@ end
 # ============================================================================
 
 """
-    DCTPlan{T, N}
+    DCTBatchedPlan{T, N}
 
-Precomputed plan for N-dimensional DCT/IDCT operations.
+Precomputed plan for N-dimensional DCT/IDCT operations (Batched).
 
 Contains cached:
 - FFT plans for each dimension
@@ -208,14 +201,14 @@ Contains cached:
 
 # Usage
 ```julia
-plan = plan_dct(x)           # Create plan for arrays like x
-y = plan * x                 # Compute DCT (allocates output)
-mul!(y, plan, x)             # Compute DCT (zero allocation)
-x_reconstructed = plan \\ y   # Compute IDCT
-ldiv!(x, plan, y)            # Compute IDCT (zero allocation)
+plan = plan_dct_batched(x)    # Create plan
+y = plan * x                  # Compute DCT
+mul!(y, plan, x)              # Compute DCT (zero allocation)
+x_rec = plan \\ y              # Compute IDCT
+ldiv!(x, plan, y)             # Compute IDCT (zero allocation)
 ```
 """
-struct DCTPlan{T, N}
+struct DCTBatchedPlan{T, N}
     # Original array size
     dims::NTuple{N, Int}
     
@@ -243,20 +236,20 @@ struct DCTPlan{T, N}
 end
 
 """
-    plan_dct(x::AbstractArray{T, N}) where {T <: Real, N}
+    plan_dct_batched(x::AbstractArray{T, N}) where {T <: Real, N}
 
-Create a DCT plan for arrays with the same size and element type as `x`.
+Create a batched DCT plan for arrays with the same size and element type as `x`.
 
 # Example
 ```julia
 x = rand(256, 256, 256)
-plan = plan_dct(x)
+plan = plan_dct_batched(x)
 y = plan * x   # DCT
 mul!(y, plan, x)  # DCT (zero allocation)
 x2 = plan \\ y  # IDCT
 ```
 """
-function plan_dct(x::AbstractArray{T, N}) where {T <: Real, N}
+function plan_dct_batched(x::AbstractArray{T, N}) where {T <: Real, N}
     dims = size(x)
     backend = get_backend(x)
     
@@ -301,7 +294,7 @@ function plan_dct(x::AbstractArray{T, N}) where {T <: Real, N}
     # Only 1 buffer needed - output y acts as the second buffer
     temp_buffer = similar(x)
     
-    return DCTPlan{T, N}(
+    return DCTBatchedPlan{T, N}(
         dims, twiddles, twiddles_inv, fft_plans, ifft_plans, v_buffers, V_buffers, temp_buffer, backend
     )
 end
@@ -386,11 +379,11 @@ end
 # ============================================================================
 
 """
-    Base.:*(plan::DCTPlan, x::AbstractArray) -> y
+    Base.:*(plan::DCTBatchedPlan, x::AbstractArray) -> y
 
 Compute the N-dimensional DCT of `x` using the precomputed plan.
 """
-function Base.:*(plan::DCTPlan{T, 1}, x::AbstractVector{T}) where T
+function Base.:*(plan::DCTBatchedPlan{T, 1}, x::AbstractVector{T}) where T
     N = plan.dims[1]
     Batch = 1
     key = (N, Batch)
@@ -408,7 +401,7 @@ function Base.:*(plan::DCTPlan{T, 1}, x::AbstractVector{T}) where T
     return y
 end
 
-function Base.:*(plan::DCTPlan{T, 2}, x::AbstractMatrix{T}) where T
+function Base.:*(plan::DCTBatchedPlan{T, 2}, x::AbstractMatrix{T}) where T
     N1, N2 = plan.dims
     
     # Step 1: DCT along dim 1
@@ -438,7 +431,7 @@ function Base.:*(plan::DCTPlan{T, 2}, x::AbstractMatrix{T}) where T
     return permutedims(t2, (2, 1))
 end
 
-function Base.:*(plan::DCTPlan{T, 3}, x::AbstractArray{T, 3}) where T
+function Base.:*(plan::DCTBatchedPlan{T, 3}, x::AbstractArray{T, 3}) where T
     N1, N2, N3 = plan.dims
     
     # Step 1: DCT along dim 1
@@ -481,11 +474,11 @@ function Base.:*(plan::DCTPlan{T, 3}, x::AbstractArray{T, 3}) where T
 end
 
 """
-    Base.:\\(plan::DCTPlan, y::AbstractArray) -> x
+    Base.:\\(plan::DCTBatchedPlan, y::AbstractArray) -> x
 
 Compute the N-dimensional IDCT of `y` using the precomputed plan.
 """
-function Base.:\(plan::DCTPlan{T, 1}, y::AbstractVector{T}) where T
+function Base.:\(plan::DCTBatchedPlan{T, 1}, y::AbstractVector{T}) where T
     N = plan.dims[1]
     Batch = 1
     key = (N, Batch)
@@ -503,7 +496,7 @@ function Base.:\(plan::DCTPlan{T, 1}, y::AbstractVector{T}) where T
     return x
 end
 
-function Base.:\(plan::DCTPlan{T, 2}, y::AbstractMatrix{T}) where T
+function Base.:\(plan::DCTBatchedPlan{T, 2}, y::AbstractMatrix{T}) where T
     N1, N2 = plan.dims
     
     # Step 1: IDCT along dim 2 (reverse order from DCT)
@@ -535,7 +528,7 @@ function Base.:\(plan::DCTPlan{T, 2}, y::AbstractMatrix{T}) where T
     return x
 end
 
-function Base.:\(plan::DCTPlan{T, 3}, y::AbstractArray{T, 3}) where T
+function Base.:\(plan::DCTBatchedPlan{T, 3}, y::AbstractArray{T, 3}) where T
     N1, N2, N3 = plan.dims
     
     # Reverse order: IDCT dim 3, then dim 2, then dim 1
@@ -586,7 +579,7 @@ end
 # ============================================================================
 
 """
-    LinearAlgebra.mul!(y, plan::DCTPlan{T, 3}, x) -> y
+    LinearAlgebra.mul!(y, plan::DCTBatchedPlan{T, 3}, x) -> y
 
 Compute 3D DCT with zero allocation using ping-pong buffer strategy.
 Uses y and plan.temp_buffer alternately to avoid allocations.
@@ -599,7 +592,7 @@ Uses y and plan.temp_buffer alternately to avoid allocations.
 5. y    → DCT dim1 → buf     # buf = (3',2',1')
 6. buf  → perm(2,3,1) → y    # y   = (1',2',3') ✓
 """
-function LinearAlgebra.mul!(y::AbstractArray{T, 3}, plan::DCTPlan{T, 3}, x::AbstractArray{T, 3}) where T
+function LinearAlgebra.mul!(y::AbstractArray{T, 3}, plan::DCTBatchedPlan{T, 3}, x::AbstractArray{T, 3}) where T
     N1, N2, N3 = plan.dims
     buf = plan.temp_buffer
     
@@ -651,7 +644,7 @@ function LinearAlgebra.mul!(y::AbstractArray{T, 3}, plan::DCTPlan{T, 3}, x::Abst
 end
 
 """
-    LinearAlgebra.ldiv!(x, plan::DCTPlan{T, 3}, y) -> x
+    LinearAlgebra.ldiv!(x, plan::DCTBatchedPlan{T, 3}, y) -> x
 
 Compute 3D IDCT with zero allocation using ping-pong buffer strategy.
 
@@ -663,7 +656,7 @@ Compute 3D IDCT with zero allocation using ping-pong buffer strategy.
 5. x    → perm(2,1,3) → buf  # buf = (1',2,3)
 6. buf  → IDCT dim1 → x     # x   = (1,2,3) ✓
 """
-function LinearAlgebra.ldiv!(x::AbstractArray{T, 3}, plan::DCTPlan{T, 3}, y::AbstractArray{T, 3}) where T
+function LinearAlgebra.ldiv!(x::AbstractArray{T, 3}, plan::DCTBatchedPlan{T, 3}, y::AbstractArray{T, 3}) where T
     N1, N2, N3 = plan.dims
     buf = plan.temp_buffer
     
@@ -715,7 +708,7 @@ function LinearAlgebra.ldiv!(x::AbstractArray{T, 3}, plan::DCTPlan{T, 3}, y::Abs
 end
 
 # 1D and 2D mul!/ldiv! - simpler versions
-function LinearAlgebra.mul!(y::AbstractVector{T}, plan::DCTPlan{T, 1}, x::AbstractVector{T}) where T
+function LinearAlgebra.mul!(y::AbstractVector{T}, plan::DCTBatchedPlan{T, 1}, x::AbstractVector{T}) where T
     N = plan.dims[1]
     Batch = 1
     key = (N, Batch)
@@ -729,7 +722,7 @@ function LinearAlgebra.mul!(y::AbstractVector{T}, plan::DCTPlan{T, 1}, x::Abstra
     return y
 end
 
-function LinearAlgebra.ldiv!(x::AbstractVector{T}, plan::DCTPlan{T, 1}, y::AbstractVector{T}) where T
+function LinearAlgebra.ldiv!(x::AbstractVector{T}, plan::DCTBatchedPlan{T, 1}, y::AbstractVector{T}) where T
     N = plan.dims[1]
     Batch = 1
     key = (N, Batch)
@@ -743,7 +736,7 @@ function LinearAlgebra.ldiv!(x::AbstractVector{T}, plan::DCTPlan{T, 1}, y::Abstr
     return x
 end
 
-function LinearAlgebra.mul!(y::AbstractMatrix{T}, plan::DCTPlan{T, 2}, x::AbstractMatrix{T}) where T
+function LinearAlgebra.mul!(y::AbstractMatrix{T}, plan::DCTBatchedPlan{T, 2}, x::AbstractMatrix{T}) where T
     N1, N2 = plan.dims
     buf = plan.temp_buffer
     
@@ -776,7 +769,7 @@ function LinearAlgebra.mul!(y::AbstractMatrix{T}, plan::DCTPlan{T, 2}, x::Abstra
     return y
 end
 
-function LinearAlgebra.ldiv!(x::AbstractMatrix{T}, plan::DCTPlan{T, 2}, y::AbstractMatrix{T}) where T
+function LinearAlgebra.ldiv!(x::AbstractMatrix{T}, plan::DCTBatchedPlan{T, 2}, y::AbstractMatrix{T}) where T
     N1, N2 = plan.dims
     buf = plan.temp_buffer
     
@@ -862,35 +855,35 @@ end
 # ============================================================================
 
 # 1D
-function dct_fast(x::AbstractVector{T}) where T <: Real
-    plan = plan_dct(x)
+function dct_batched(x::AbstractVector{T}) where T <: Real
+    plan = plan_dct_batched(x)
     return plan * x
 end
 
-function idct_fast(y::AbstractVector{T}) where T <: Real
-    plan = plan_dct(y)
+function idct_batched(y::AbstractVector{T}) where T <: Real
+    plan = plan_dct_batched(y)
     return plan \ y
 end
 
 # 2D
-function dct_fast(x::AbstractMatrix{T}) where T <: Real
-    plan = plan_dct(x)
+function dct_batched(x::AbstractMatrix{T}) where T <: Real
+    plan = plan_dct_batched(x)
     return plan * x
 end
 
-function idct_fast(y::AbstractMatrix{T}) where T <: Real
-    plan = plan_dct(y)
+function idct_batched(y::AbstractMatrix{T}) where T <: Real
+    plan = plan_dct_batched(y)
     return plan \ y
 end
 
 # 3D
-function dct_fast(x::AbstractArray{T, 3}) where T <: Real
-    plan = plan_dct(x)
+function dct_batched(x::AbstractArray{T, 3}) where T <: Real
+    plan = plan_dct_batched(x)
     return plan * x
 end
 
-function idct_fast(y::AbstractArray{T, 3}) where T <: Real
-    plan = plan_dct(y)
+function idct_batched(y::AbstractArray{T, 3}) where T <: Real
+    plan = plan_dct_batched(y)
     return plan \ y
 end
 
@@ -899,12 +892,12 @@ end
 # ============================================================================
 
 """
-    dct_fast!(y, x, plan::DCTPlan)
+    dct_batched!(y, x, plan::DCTBatchedPlan)
 
 Compute the N-dimensional DCT of `x` and store the result in `y`.
 Uses preallocated buffers from the plan.
 """
-function dct_fast!(y::AbstractVector{T}, x::AbstractVector{T}, plan::DCTPlan{T, 1}) where T
+function dct_batched!(y::AbstractVector{T}, x::AbstractVector{T}, plan::DCTBatchedPlan{T, 1}) where T
     N = plan.dims[1]
     Batch = 1
     key = (N, Batch)
@@ -921,7 +914,7 @@ function dct_fast!(y::AbstractVector{T}, x::AbstractVector{T}, plan::DCTPlan{T, 
     return y
 end
 
-function dct_fast!(y::AbstractMatrix{T}, x::AbstractMatrix{T}, plan::DCTPlan{T, 2}) where T
+function dct_batched!(y::AbstractMatrix{T}, x::AbstractMatrix{T}, plan::DCTBatchedPlan{T, 2}) where T
     N1, N2 = plan.dims
     
     # Step 1: DCT along dim 1
@@ -954,7 +947,7 @@ function dct_fast!(y::AbstractMatrix{T}, x::AbstractMatrix{T}, plan::DCTPlan{T, 
     return y
 end
 
-function dct_fast!(y::AbstractArray{T, 3}, x::AbstractArray{T, 3}, plan::DCTPlan{T, 3}) where T
+function dct_batched!(y::AbstractArray{T, 3}, x::AbstractArray{T, 3}, plan::DCTBatchedPlan{T, 3}) where T
     # Just use the non-in-place version and copy
     result = plan * x
     copyto!(y, result)
@@ -962,12 +955,12 @@ function dct_fast!(y::AbstractArray{T, 3}, x::AbstractArray{T, 3}, plan::DCTPlan
 end
 
 """
-    idct_fast!(x, y, plan::DCTPlan)
+    idct_batched!(x, y, plan::DCTBatchedPlan)
 
 Compute the N-dimensional IDCT of `y` and store the result in `x`.
 Uses preallocated buffers from the plan.
 """
-function idct_fast!(x::AbstractVector{T}, y::AbstractVector{T}, plan::DCTPlan{T, 1}) where T
+function idct_batched!(x::AbstractVector{T}, y::AbstractVector{T}, plan::DCTBatchedPlan{T, 1}) where T
     N = plan.dims[1]
     Batch = 1
     key = (N, Batch)
@@ -984,18 +977,18 @@ function idct_fast!(x::AbstractVector{T}, y::AbstractVector{T}, plan::DCTPlan{T,
     return x
 end
 
-function idct_fast!(x::AbstractMatrix{T}, y::AbstractMatrix{T}, plan::DCTPlan{T, 2}) where T
+function idct_batched!(x::AbstractMatrix{T}, y::AbstractMatrix{T}, plan::DCTBatchedPlan{T, 2}) where T
     # Use the non-in-place version and copy
     result = plan \ y
     copyto!(x, result)
     return x
 end
 
-function idct_fast!(x::AbstractArray{T, 3}, y::AbstractArray{T, 3}, plan::DCTPlan{T, 3}) where T
+function idct_batched!(x::AbstractArray{T, 3}, y::AbstractArray{T, 3}, plan::DCTBatchedPlan{T, 3}) where T
     # Use the non-in-place version and copy
     result = plan \ y
     copyto!(x, result)
     return x
 end
 
-export dct_fast!, idct_fast!
+public dct_batched!, idct_batched!

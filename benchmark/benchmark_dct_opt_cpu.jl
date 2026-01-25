@@ -16,6 +16,7 @@ using Printf
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 
 using AcceleratedDCTs
+using AcceleratedDCTs: plan_dct, dct_batched
 
 
 # Benchmark function for CPU
@@ -59,7 +60,7 @@ for N in Ns
     y_complex = Array{ComplexF64}(undef, cdims)
     
     # Create Plans
-    p_opt = plan_dct_opt(x_cpu)
+    p_opt = plan_dct(x_cpu)
     p_rfft = plan_rfft(x_cpu)
     p_fftw_dct = FFTW.plan_dct(x_cpu)
     
@@ -83,7 +84,7 @@ for N in Ns
     
     # Measure Batched DCT (Allocating - No mul! support)
     print("  Batched DCT... ")
-    times_batched = benchmark_cpu(dct_fast, x_cpu; n_samples=5)
+    times_batched = benchmark_cpu(dct_batched, x_cpu; n_samples=5)
     t_batched = median(times_batched)
     println("Done ($t_batched ms)")
     

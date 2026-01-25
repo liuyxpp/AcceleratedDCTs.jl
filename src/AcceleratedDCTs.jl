@@ -1,5 +1,6 @@
 module AcceleratedDCTs
 
+using LinearAlgebra
 using KernelAbstractions
 using AbstractFFTs
 
@@ -12,10 +13,10 @@ include("dct_batch.jl")
 # Optimized implementations using R2C FFT and KernelAbstractions
 include("dct_optimized.jl")
 
-export dct1d, idct1d, dct2d, idct2d, dct3d, idct3d  # reference implementations
-export dct_fast, idct_fast  # batched implementations
-export DCTPlan, plan_dct, dct_fast!, idct_fast!  # planned implementations with buffer caching
-export dct_2d_opt, idct_2d_opt, dct_3d_opt, idct_3d_opt
+public dct1d, idct1d, dct2d, idct2d, dct3d, idct3d  # reference implementations
+public dct_batched, idct_batched  # batched implementations
+public DCTBatchedPlan, plan_dct_batched  # planned batched implementations
+public dct, idct, dct!, idct!, plan_dct, plan_idct, DCTPlan, IDCTPlan # optimized implementations
 
 end # module AcceleratedDCTs
 

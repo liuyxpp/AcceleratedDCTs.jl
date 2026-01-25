@@ -1,19 +1,13 @@
-using KernelAbstractions
-using AbstractFFTs
-using LinearAlgebra
-
-export plan_dct_opt, plan_idct_opt
-
 # ============================================================================
 # AbstractFFTs Plan Definitions
 # ============================================================================
 
 """
-    DCTOptPlan
+    DCTPlan
 
 Optimized DCT Plan for device-agnostic execution.
 """
-struct DCTOptPlan{T, N, P, Twiddles, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
+struct DCTPlan{T, N, P, Twiddles, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
     complex_plan::P      # RFFT plan
     twiddles::Twiddles   # Tuple of twiddles (w1, w2, ...)
     tmp_real::BReal      # Real buffer for Permutation
@@ -23,11 +17,11 @@ struct DCTOptPlan{T, N, P, Twiddles, BReal, BComp, Region} <: AbstractFFTs.Plan{
 end
 
 """
-    IDCTOptPlan
+    IDCTPlan
 
 Optimized IDCT Plan for device-agnostic execution.
 """
-struct IDCTOptPlan{T, N, P, Twiddles, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
+struct IDCTPlan{T, N, P, Twiddles, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
     complex_plan::P      # IRFFT plan
     twiddles::Twiddles   # Tuple of twiddles
     tmp_real::BReal      # Real buffer
@@ -37,17 +31,17 @@ struct IDCTOptPlan{T, N, P, Twiddles, BReal, BComp, Region} <: AbstractFFTs.Plan
 end
 
 # Properties
-Base.ndims(::DCTOptPlan{T, N}) where {T, N} = N
-Base.ndims(::IDCTOptPlan{T, N}) where {T, N} = N
+Base.ndims(::DCTPlan{T, N}) where {T, N} = N
+Base.ndims(::IDCTPlan{T, N}) where {T, N} = N
 
 # Properties
-Base.size(p::DCTOptPlan) = size(p.tmp_real)
-Base.size(p::IDCTOptPlan) = size(p.tmp_real)
-Base.eltype(::DCTOptPlan{T}) where T = T
-Base.eltype(::IDCTOptPlan{T}) where T = T
+Base.size(p::DCTPlan) = size(p.tmp_real)
+Base.size(p::IDCTPlan) = size(p.tmp_real)
+Base.eltype(::DCTPlan{T}) where T = T
+Base.eltype(::IDCTPlan{T}) where T = T
 
 # Plan creation
-function plan_dct_opt(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
+function plan_dct(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
     # Currently only full transform supported
     if region != 1:N && region != 1:ndims(x) && region != (1:ndims(x)...,)
         error("Partial DCT optimization not yet implemented. Use region=1:ndims(x)")
@@ -74,12 +68,12 @@ function plan_dct_opt(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
     # Generate on CPU, copy to GPU
     twiddles = ntuple(i -> _get_twiddles_gpu(dims[i], T, backend), N)
     
-    return DCTOptPlan{T, N, typeof(complex_plan), typeof(twiddles), typeof(tmp_real), typeof(tmp_comp), typeof(region)}(
+    return DCTPlan{T, N, typeof(complex_plan), typeof(twiddles), typeof(tmp_real), typeof(tmp_comp), typeof(region)}(
         complex_plan, twiddles, tmp_real, tmp_comp, region, Ref{Any}(nothing)
     )
 end
 
-function plan_idct_opt(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
+function plan_idct(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
     # IDCT Plan
     if region != 1:N && region != 1:ndims(x) && region != (1:ndims(x)...,)
         error("Partial IDCT optimization not yet implemented. Use region=1:ndims(x)")
@@ -101,50 +95,48 @@ function plan_idct_opt(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
     # 3. Twiddles
     twiddles = ntuple(i -> _get_twiddles_gpu(dims[i], T, backend), N)
     
-    return IDCTOptPlan{T, N, typeof(complex_plan), typeof(twiddles), typeof(tmp_real), typeof(tmp_comp), typeof(region)}(
+    return IDCTPlan{T, N, typeof(complex_plan), typeof(twiddles), typeof(tmp_real), typeof(tmp_comp), typeof(region)}(
         complex_plan, twiddles, tmp_real, tmp_comp, region, Ref{Any}(nothing)
     )
 end
 
 # Inversion (caching)
-function Base.inv(p::DCTOptPlan{T, N}) where {T, N}
+function Base.inv(p::DCTPlan{T, N}) where {T, N}
     if p.pinv[] === nothing
         # create inverse plan matching p
-        # We need an IDCT plan compatible with the dimensions
-        # Use tmp_real to template the IDCT plan
-        p.pinv[] = plan_idct_opt(p.tmp_real, p.region)
+        p.pinv[] = plan_idct(p.tmp_real, p.region)
     end
     return p.pinv[]
 end
 
-function Base.inv(p::IDCTOptPlan{T, N}) where {T, N}
+function Base.inv(p::IDCTPlan{T, N}) where {T, N}
     if p.pinv[] === nothing
-        p.pinv[] = plan_dct_opt(p.tmp_real, p.region)
+        p.pinv[] = plan_dct(p.tmp_real, p.region)
     end
     return p.pinv[]
 end
 
 # Execution: *
-function Base.:*(p::DCTOptPlan, x::AbstractArray)
+function Base.:*(p::DCTPlan, x::AbstractArray)
     y = similar(x)
     mul!(y, p, x)
     return y
 end
 
-function Base.:*(p::IDCTOptPlan, x::AbstractArray)
+function Base.:*(p::IDCTPlan, x::AbstractArray)
     y = similar(x)
     mul!(y, p, x)
     return y
 end
 
 # Execution: \ (ldiv)
-function Base.:\(p::DCTOptPlan, x::AbstractArray)
+function Base.:\(p::DCTPlan, x::AbstractArray)
     # plan \ x == inv(plan) * x
     inv_p = inv(p)
     return inv_p * x
 end
 
-function Base.:\(p::IDCTOptPlan, x::AbstractArray)
+function Base.:\(p::IDCTPlan, x::AbstractArray)
     inv_p = inv(p)
     return inv_p * x
 end
@@ -152,7 +144,7 @@ end
 # Execution: mul! and ldiv!
 
 # dct!
-function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 2}, x::AbstractArray) where T
+function LinearAlgebra.mul!(y::AbstractArray, p::DCTPlan{T, 2}, x::AbstractArray) where T
     backend = get_backend(x)
     N1, N2 = size(x)
     
@@ -179,7 +171,7 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 2}, x::AbstractAr
     return y
 end
 
-function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 3}, x::AbstractArray) where T
+function LinearAlgebra.mul!(y::AbstractArray, p::DCTPlan{T, 3}, x::AbstractArray) where T
     backend = get_backend(x)
     N1, N2, N3 = size(x)
     
@@ -206,7 +198,7 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCTOptPlan{T, 3}, x::AbstractAr
 end
 
 # idct! (via mul!(y, inv_plan, x))
-function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 2}, x::AbstractArray) where T
+function LinearAlgebra.mul!(y::AbstractArray, p::IDCTPlan{T, 2}, x::AbstractArray) where T
     backend = get_backend(x)
     N1, N2 = size(x)
     limit_n1 = N1 ÷ 2
@@ -233,7 +225,7 @@ function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 2}, x::AbstractA
     return y
 end
 
-function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 3}, x::AbstractArray) where T
+function LinearAlgebra.mul!(y::AbstractArray, p::IDCTPlan{T, 3}, x::AbstractArray) where T
     backend = get_backend(x)
     N1, N2, N3 = size(x)
     limit_n1 = N1 ÷ 2
@@ -261,12 +253,12 @@ function LinearAlgebra.mul!(y::AbstractArray, p::IDCTOptPlan{T, 3}, x::AbstractA
 end
 
 # Support ldiv!(y, plan, x) => mul!(y, inv(plan), x)
-function LinearAlgebra.ldiv!(y::AbstractArray, p::DCTOptPlan, x::AbstractArray)
+function LinearAlgebra.ldiv!(y::AbstractArray, p::DCTPlan, x::AbstractArray)
     inv_p = inv(p)
     mul!(y, inv_p, x)
 end
 
-function LinearAlgebra.ldiv!(y::AbstractArray, p::IDCTOptPlan, x::AbstractArray)
+function LinearAlgebra.ldiv!(y::AbstractArray, p::IDCTPlan, x::AbstractArray)
     inv_p = inv(p)
     mul!(y, inv_p, x)
 end
@@ -540,24 +532,35 @@ end
 # Convenience Functions (using One-Shot plan)
 # ============================================================================
 
-function dct_2d_opt(x::AbstractMatrix{T}) where T <: Real
-    p = plan_dct_opt(x)
+function dct(x::AbstractArray{T, N}) where {T <: Real, N}
+    p = plan_dct(x)
     return p * x
 end
 
-function idct_2d_opt(x::AbstractMatrix{T}) where T <: Real
-    p = plan_idct_opt(x)
+function idct(x::AbstractArray{T, N}) where {T <: Real, N}
+    p = plan_idct(x)
     return p * x
 end
 
-function dct_3d_opt(x::AbstractArray{T, 3}) where T <: Real
-    p = plan_dct_opt(x)
-    return p * x
+# In-place convenience
+function dct!(x::AbstractArray{T, N}) where {T <: Real, N}
+    p = plan_dct(x)
+    # Note: Optimization only safe if input can be destroyed.
+    # Our optimized mul!(y, p, x) uses tmp buffers in plan.
+    # If we want literal in-place dct!(x), we need y=x?
+    # mul!(y, p, x) handles x->preprocess->fft->postprocess->y.
+    # If x===y, we need to ensure safety.
+    # Logic: x -> tmp_real ... -> tmp_comp ... -> x.
+    # Since tmp_real copy happens first, x can be overwritten in final step.
+    # Yes, typically safer to write:
+    mul!(x, p, x) 
+    return x
 end
 
-function idct_3d_opt(x::AbstractArray{T, 3}) where T <: Real
-    p = plan_idct_opt(x)
-    return p * x
+function idct!(x::AbstractArray{T, N}) where {T <: Real, N}
+    p = plan_idct(x)
+    mul!(x, p, x)
+    return x
 end
 
 # ============================================================================

@@ -1,4 +1,4 @@
-using FFTW
+import FFTW
 using AcceleratedDCTs
 using Test
 using LinearAlgebra

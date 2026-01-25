@@ -1,23 +1,83 @@
-using FFTW
+import FFTW
 using Test
 using AcceleratedDCTs
-using LinearAlgebra
+using AcceleratedDCTs: dct, idct, plan_dct, DCTPlan, dct!, idct!
+using AcceleratedDCTs: dct2d, dct3d # Reference implementations
+using LinearAlgebra: mul!, ldiv!
 using Statistics
 
-@testset "Optimized 2D DCT" begin
+@testset "Optimized DCT-II (2D)" begin
+    # ------------------------------------------------------------------
+    # Optimized DCT-II (2D)
+    # ------------------------------------------------------------------
     
+    # Define N1, N2 for the tests within this block
+    N1, N2 = 8, 8 
+    
+    @testset "Core API Functionality" begin
+        x = rand(Float64, N1, N2)
+        
+        # 1. Plan creation
+        p = plan_dct(x)
+        @test p isa DCTPlan
+        
+        # 2. Forward (allocating)
+        y = p * x
+        
+        # 3. Convenience function
+        y_conv = dct(x)
+        @test y_conv ≈ y
+        
+        # 4. Inverse
+        x_rec = idct(y)
+        @test x_rec ≈ x atol=1e-12
+        
+        # 5. Non-allocating execution
+        y_out = similar(x)
+        mul!(y_out, p, x)
+        @test y_out ≈ y
+        
+        # 6. In-place convenience
+        x_copy = copy(x)
+        dct!(x_copy)
+        @test x_copy ≈ y
+        
+        # 7. In-place Inverse convenience
+        idct!(x_copy)
+        @test x_copy ≈ x atol=1e-12
+        
+        # 8. Plan Inverse (Allocating)
+        x_inv = p \ y
+        @test x_inv ≈ x atol=1e-12
+        
+        # 9. Plan Inverse (Non-allocating ldiv!)
+        x_ldiv = similar(x)
+        ldiv!(x_ldiv, p, y)
+        @test x_ldiv ≈ x atol=1e-12
+        
+        # 10. Explicit Inverse Plan
+        p_inv = inv(p)
+        x_inv_p = p_inv * y
+        @test x_inv_p ≈ x atol=1e-12
+        
+        # 11. Inverse Plan reuse
+        x_inv_p2 = similar(x)
+        mul!(x_inv_p2, p_inv, y)
+        @test x_inv_p2 ≈ x atol=1e-12
+    end
+
     @testset "Roundtrip Accuracy" begin
         # Test square and non-square matrices
         sizes = [(4, 4), (8, 8), (16, 16), (4, 8), (8, 16), (32, 8)]
         
-        for (N1, N2) in sizes
-            x = rand(N1, N2)
+        for (N1_rt, N2_rt) in sizes
+            x = rand(N1_rt, N2_rt)
             
             # Forward
-            y = dct_2d_opt(x)
+            y = dct(x)
             
             # Inverse
-            x_rec = idct_2d_opt(y)
+            x_rec = idct(y)
             
             # Verify exact reconstruction
             @test x_rec ≈ x atol=1e-14
@@ -30,8 +90,8 @@ using Statistics
         x2 = rand(N1, N2)
         a, b = 2.5, -1.5
         
-        y_comb = dct_2d_opt(a .* x1 .+ b .* x2)
-        y_sep = a .* dct_2d_opt(x1) .+ b .* dct_2d_opt(x2)
+        y_comb = dct(a .* x1 .+ b .* x2)
+        y_sep = a .* dct(x1) .+ b .* dct(x2)
         
         @test y_comb ≈ y_sep atol=1e-12
     end
@@ -47,7 +107,7 @@ using Statistics
         y_ref = dct2d(x)
         
         # Optimized implementation
-        y_opt = dct_2d_opt(x)
+        y_opt = dct(x)
         
         # Check scaling factor is consistently 4.0
         ratio = y_opt ./ y_ref
@@ -63,19 +123,41 @@ end
         sizes = [(4, 4, 4), (8, 8, 8), (4, 8, 4)]
         for sz in sizes
             x = rand(sz...)
-            y = dct_3d_opt(x)
-            x_rec = idct_3d_opt(y)
+            y = dct(x)
+            x_rec = idct(y)
             @test x_rec ≈ x atol=1e-13
         end
     end
     
+    @testset "3D API Coverage" begin
+        # Verify 3D specific API points
+        N = 8
+        x = rand(N, N, N)
+        p = plan_dct(x)
+        y = p * x
+        
+        # In-place 3D
+        x_copy = copy(x)
+        dct!(x_copy)
+        @test x_copy ≈ y
+        
+        # Inverse 3D in-place
+        idct!(x_copy)
+        @test x_copy ≈ x atol=1e-12
+        
+        # ldiv! 3D
+        x_rec = similar(x)
+        ldiv!(x_rec, p, y)
+        @test x_rec ≈ x atol=1e-12
+    end
+
     @testset "Consistency with Reference DCT" begin
-            # 2D has factor 4. 3D should have factor 8?
-            N1, N2, N3 = 4, 4, 4
-            x = rand(N1, N2, N3)
-            y_ref = dct3d(x)
-            y_opt = dct_3d_opt(x)
-            ratio = y_opt ./ y_ref
-            @test all(isapprox.(ratio, 8.0, atol=1e-5))
+        # 2D has factor 4. 3D should have factor 8?
+        N1, N2, N3 = 4, 4, 4
+        x = rand(N1, N2, N3)
+        y_ref = dct3d(x)
+        y_opt = dct(x)
+        ratio = y_opt ./ y_ref
+        @test all(isapprox.(ratio, 8.0, atol=1e-5))
     end
 end

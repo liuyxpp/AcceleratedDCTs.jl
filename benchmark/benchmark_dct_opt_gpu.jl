@@ -17,6 +17,7 @@ using LinearAlgebra
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 
 using AcceleratedDCTs
+using AcceleratedDCTs: plan_dct, dct_batched
 
 println("="^60)
 println("Benchmark: 3D DCT (Algorithm 3) vs dct_fast vs cuFFT (GPU)")
@@ -110,7 +111,7 @@ for N in Ns
     y_complex_gpu = CUDA.zeros(ComplexF64, cdims...)
     
     # Warmup / Pre-plan
-    p = plan_dct_opt(x_gpu)
+    p = plan_dct(x_gpu)
     p_rfft = plan_rfft(x_gpu)
     
     # Measure cuFFT (Baseline - mul!)
@@ -123,7 +124,7 @@ for N in Ns
     t_opt = isempty(times_opt) || isnan(times_opt[1]) ? NaN : median(times_opt)
     
     # Measure Batched DCT (Allocating)
-    times_batched = safe_benchmark("Batched DCT", dct_fast, x_gpu; n_samples=5)
+    times_batched = safe_benchmark("Batched DCT", dct_batched, x_gpu; n_samples=5)
     t_batched = isempty(times_batched) || isnan(times_batched[1]) ? NaN : median(times_batched)
 
     push!(results, (N, t_rfft, t_opt, t_batched))
