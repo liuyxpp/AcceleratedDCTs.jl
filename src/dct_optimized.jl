@@ -375,8 +375,9 @@ end
         idx1 = iseven(n1) ? (n1 ÷ 2) : (N1 - (n1 + 1) ÷ 2)
         idx2 = iseven(n2) ? (n2 ÷ 2) : (N2 - (n2 + 1) ÷ 2)
         
-        # 0.25 scaling
-        y[n1+1, n2+1] = 0.25f0 * v[idx1+1, idx2+1]
+        # 0.25 scaling (type-correct)
+        T = eltype(y)
+        y[n1+1, n2+1] = T(0.25) * v[idx1+1, idx2+1]
     end
 end
 
@@ -465,8 +466,9 @@ end
         idx2 = iseven(n2) ? (n2 ÷ 2) : (N2 - (n2 + 1) ÷ 2)
         idx3 = iseven(n3) ? (n3 ÷ 2) : (N3 - (n3 + 1) ÷ 2)
         
-        # 0.125 scaling
-        y[n1+1, n2+1, n3+1] = 0.125f0 * v[idx1+1, idx2+1, idx3+1]
+        # 0.125 scaling (type-correct)
+        T = eltype(y)
+        y[n1+1, n2+1, n3+1] = T(0.125) * v[idx1+1, idx2+1, idx3+1]
     end
 end
 
@@ -489,17 +491,28 @@ end
 end
 
 @inline function _get_X3_val(X, n1, n2, n3, N1, N2, N3)
-    # Symmetry: X[n1, n2, n3] = conj(X[N1-n1, N2-n2, N3-n3])
-    # RFFT dim 1 range: 0 to N1/2
+    # Branchless Hermitian symmetry reconstruction
+    # Avoids warp divergence on GPU by using predicated execution
+    half_N1 = N1 ÷ 2
+    use_sym = n1 > half_N1
     
-    if n1 <= (N1 ÷ 2)
-        @inbounds return X[n1+1, n2+1, n3+1]
-    else
-        n1_s = N1 - n1
-        n2_s = (n2 == 0) ? 0 : N2 - n2
-        n3_s = (n3 == 0) ? 0 : N3 - n3
-        @inbounds return conj(X[n1_s+1, n2_s+1, n3_s+1])
-    end
+    # Direct indices (always computed)
+    i1_d = n1 + 1
+    i2_d = n2 + 1
+    i3_d = n3 + 1
+    
+    # Symmetric indices (always computed, selected conditionally)
+    i1_s = N1 - n1 + 1
+    i2_s = ifelse(n2 == 0, 1, N2 - n2 + 1)
+    i3_s = ifelse(n3 == 0, 1, N3 - n3 + 1)
+    
+    # Select indices based on whether we need symmetry
+    i1 = ifelse(use_sym, i1_s, i1_d)
+    i2 = ifelse(use_sym, i2_s, i2_d)
+    i3 = ifelse(use_sym, i3_s, i3_d)
+    
+    @inbounds val = X[i1, i2, i3]
+    return ifelse(use_sym, conj(val), val)
 end
 
 # ============================================================================
