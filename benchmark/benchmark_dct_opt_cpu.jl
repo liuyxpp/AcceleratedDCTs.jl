@@ -22,7 +22,7 @@ println("="^60)
 println()
 
 # Setup
-N = 128
+N = 256
 x_cpu = rand(Float64, N, N, N)
 
 println("Grid size: $(N)x$(N)x$(N)")
@@ -43,6 +43,7 @@ p = plan_dct_opt(x_cpu)
 _ = p * x_cpu
 _ = dct_3d_opt(x_cpu)
 _ = dct_fast(x_cpu)
+_ = FFTW.dct(x_cpu)
 _ = rfft(x_cpu)
 println("Warmup complete.")
 println()
@@ -113,6 +114,19 @@ println("  Median time:   $(round(median(times_rfft), digits=3)) ms")
 println()
 
 # ============================================================================
+# Benchmark FFTW dct (REDFT10)
+# ============================================================================
+println("-"^60)
+println("Benchmarking FFTW dct (REDFT10)...")
+println("Description: FFTW native DCT-II implementation")
+println("-"^60)
+
+# FFTW dct default is along all dims if not specified, but safe to verify
+times_fftw_dct = benchmark_cpu(x -> FFTW.dct(x), x_cpu)
+println("  Median time:   $(round(median(times_fftw_dct), digits=3)) ms")
+println()
+
+# ============================================================================
 # Performance Comparison Summary
 # ============================================================================
 println("="^60)
@@ -123,6 +137,7 @@ baseline = median(times_rfft)
 time_opt = median(times_dct_opt)
 time_opt_plan = median(times_dct_opt_plan)
 time_fast = median(times_dct_fast)
+time_fftw_dct = median(times_fftw_dct)
 
 ratio_opt = time_opt / baseline
 ratio_opt_plan = time_opt_plan / baseline
@@ -132,6 +147,7 @@ speedup_plan = time_opt / time_opt_plan
 println()
 println("Baselines:")
 println("  FFTW rfft:               $(round(baseline, digits=3)) ms")
+println("  FFTW dct (REDFT10):      $(round(time_fftw_dct, digits=3)) ms ($(round(time_fftw_dct/baseline, digits=2))x slower vs FFT)")
 println()
 println("DCT Variants:")
 println("  dct_3d_opt (One-shot):   $(round(time_opt, digits=3)) ms ($(round(ratio_opt, digits=2))x slower vs FFT)")

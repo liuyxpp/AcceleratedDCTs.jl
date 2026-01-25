@@ -61,7 +61,7 @@ function plan_dct_opt(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
     
     # Complex buffer size calculation (RFFT)
     # RFFT on real array of size (N1, N2, ...) -> (N1÷2+1, N2, ...)
-    cdims = ntuple(i -> (i == 1) ? (dims[1] ÷ 2 + 1) : dims[i], N)
+    cdims = ntuple(i -> ifelse(i == 1, dims[1] ÷ 2 + 1, dims[i]), N)
     tmp_comp = KernelAbstractions.allocate(backend, Complex{T}, cdims...)
     
     # 2. Plan RFFT
@@ -90,7 +90,7 @@ function plan_idct_opt(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
     
     # 1. Buffers
     tmp_real = similar(x)
-    cdims = ntuple(i -> (i == 1) ? (dims[1] ÷ 2 + 1) : dims[i], N)
+    cdims = ntuple(i -> ifelse(i == 1, dims[1] ÷ 2 + 1, dims[i]), N)
     tmp_comp = KernelAbstractions.allocate(backend, Complex{T}, cdims...)
     
     # 2. Plan IRFFT
@@ -277,21 +277,26 @@ end
 # ============================================================================
 
 @kernel function dct_2d_preprocess_kernel!(x_prime, @Const(x), N1, N2, limit1, limit2)
+    # Scatter-based Optimization for Coalesced Reads
+    # Thread (k1, k2) reads linear x[k1, k2] and scatters to x_prime[dest]
+    
     I = @index(Global, Cartesian)
-    n1 = I[1] - 1
-    n2 = I[2] - 1
+    k1 = I[1] - 1
+    k2 = I[2] - 1
     
-    # 2D permutation: x'[n1, n2] = x[p1[n1], p2[n2]]
-    # p[n] = (n <= limit) ? 2n : 2N - 2n - 1
-    
-    if n1 < N1 && n2 < N2
-        # Compute source index for n1
-        src1 = (n1 <= limit1) ? 2 * n1 : 2 * N1 - 2 * n1 - 1
+    if k1 < N1 && k2 < N2
+        # Read x (Coalesced)
+        @inbounds val = x[k1+1, k2+1]
         
-        # Compute source index for n2
-        src2 = (n2 <= limit2) ? 2 * n2 : 2 * N2 - 2 * n2 - 1
+        # Calculate destinations based on inverse permutation
+        # p[n] = k.
+        # If k is even: k = 2n => n = k/2.
+        # If k is odd: k = 2N - 2n - 1 => 2n = 2N - 1 - k => n = N - (k+1)/2.
         
-        @inbounds x_prime[n1+1, n2+1] = x[src1+1, src2+1]
+        dest1 = ifelse(iseven(k1), k1 ÷ 2, N1 - (k1 + 1) ÷ 2)
+        dest2 = ifelse(iseven(k2), k2 ÷ 2, N2 - (k2 + 1) ÷ 2)
+        
+        @inbounds x_prime[dest1+1, dest2+1] = val
     end
 end
 
@@ -308,7 +313,7 @@ end
         val1 = _get_X2_val(X, n1, n2, N1, N2)
         
         # val2 = X[N1-n1, n2]
-        n1_b = (n1 == 0) ? 0 : N1 - n1
+        n1_b = ifelse(n1 == 0, 0, N1 - n1)
         val2 = _get_X2_val(X, n1_b, n2, N1, N2)
         
         term = W1 * val1 + conj(W1) * val2
@@ -334,10 +339,10 @@ end
         # x is N1xN2.
         
         idx1_a = n1
-        idx1_b = (n1 == 0) ? N1 : N1 - n1
+        idx1_b = ifelse(n1 == 0, N1, N1 - n1)
         
         idx2_a = n2
-        idx2_b = (n2 == 0) ? N2 : N2 - n2
+        idx2_b = ifelse(n2 == 0, N2, N2 - n2)
         
         v1 = _get_val_safe(x, idx1_a, idx2_a, N1, N2)
         v2 = _get_val_safe(x, idx1_b, idx2_b, N1, N2)
@@ -363,8 +368,8 @@ end
         # Inverse permutation
         # p[n] = (n even) ? n/2 : N - (n+1)/2
         
-        idx1 = iseven(n1) ? (n1 ÷ 2) : (N1 - (n1 + 1) ÷ 2)
-        idx2 = iseven(n2) ? (n2 ÷ 2) : (N2 - (n2 + 1) ÷ 2)
+        idx1 = ifelse(iseven(n1), n1 ÷ 2, N1 - (n1 + 1) ÷ 2)
+        idx2 = ifelse(iseven(n2), n2 ÷ 2, N2 - (n2 + 1) ÷ 2)
         
         # 0.25 scaling (type-correct)
         T = eltype(y)
@@ -377,15 +382,18 @@ end
 # ============================================================================
 
 @kernel function dct_3d_preprocess_kernel!(x_prime, @Const(x), N1, N2, N3, limit1, limit2, limit3)
+    # Scatter-based Optimization for Coalesced Reads
     I = @index(Global, Cartesian)
-    n1, n2, n3 = I[1]-1, I[2]-1, I[3]-1
+    k1, k2, k3 = I[1]-1, I[2]-1, I[3]-1
     
-    if n1 < N1 && n2 < N2 && n3 < N3
-        src1 = (n1 <= limit1) ? 2 * n1 : 2 * N1 - 2 * n1 - 1
-        src2 = (n2 <= limit2) ? 2 * n2 : 2 * N2 - 2 * n2 - 1
-        src3 = (n3 <= limit3) ? 2 * n3 : 2 * N3 - 2 * n3 - 1
+    if k1 < N1 && k2 < N2 && k3 < N3
+        @inbounds val = x[k1+1, k2+1, k3+1]
         
-        @inbounds x_prime[n1+1, n2+1, n3+1] = x[src1+1, src2+1, src3+1]
+        dest1 = ifelse(iseven(k1), k1 ÷ 2, N1 - (k1 + 1) ÷ 2)
+        dest2 = ifelse(iseven(k2), k2 ÷ 2, N2 - (k2 + 1) ÷ 2)
+        dest3 = ifelse(iseven(k3), k3 ÷ 2, N3 - (k3 + 1) ÷ 2)
+        
+        @inbounds x_prime[dest1+1, dest2+1, dest3+1] = val
     end
 end
 
@@ -399,8 +407,8 @@ end
         # Recursive phi1 reconstruction
         # Needs 4 points from X
         
-        n1_src = (n1 == 0) ? 0 : N1 - n1
-        n2_src = (n2 == 0) ? 0 : N2 - n2
+        n1_src = ifelse(n1 == 0, 0, N1 - n1)
+        n2_src = ifelse(n2 == 0, 0, N2 - n2)
         
         # To get 3D X values with symmetry
         # (n1, n2, n3)
@@ -427,9 +435,9 @@ end
     if n1 <= limit_n1 && n2 < N2 && n3 < N3
         W1 = w1[n1+1]; W2 = w2[n2+1]; W3 = w3[n3+1]
         
-        idx1_a = n1; idx1_b = (n1 == 0) ? N1 : N1 - n1
-        idx2_a = n2; idx2_b = (n2 == 0) ? N2 : N2 - n2
-        idx3_a = n3; idx3_b = (n3 == 0) ? N3 : N3 - n3
+        idx1_a = n1; idx1_b = ifelse(n1 == 0, N1, N1 - n1)
+        idx2_a = n2; idx2_b = ifelse(n2 == 0, N2, N2 - n2)
+        idx3_a = n3; idx3_b = ifelse(n3 == 0, N3, N3 - n3)
         
         v000 = _get_val_safe_3d(x, idx1_a, idx2_a, idx3_a, N1, N2, N3)
         v100 = _get_val_safe_3d(x, idx1_b, idx2_a, idx3_a, N1, N2, N3)
@@ -453,9 +461,9 @@ end
     n1, n2, n3 = I[1]-1, I[2]-1, I[3]-1
     
     if n1 < N1 && n2 < N2 && n3 < N3
-        idx1 = iseven(n1) ? (n1 ÷ 2) : (N1 - (n1 + 1) ÷ 2)
-        idx2 = iseven(n2) ? (n2 ÷ 2) : (N2 - (n2 + 1) ÷ 2)
-        idx3 = iseven(n3) ? (n3 ÷ 2) : (N3 - (n3 + 1) ÷ 2)
+        idx1 = ifelse(iseven(n1), n1 ÷ 2, N1 - (n1 + 1) ÷ 2)
+        idx2 = ifelse(iseven(n2), n2 ÷ 2, N2 - (n2 + 1) ÷ 2)
+        idx3 = ifelse(iseven(n3), n3 ÷ 2, N3 - (n3 + 1) ÷ 2)
         
         # 0.125 scaling (type-correct)
         T = eltype(y)
