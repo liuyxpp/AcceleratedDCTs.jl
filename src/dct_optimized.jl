@@ -490,6 +490,28 @@ end
     @inbounds return x[n1+1, n2+1, n3+1]
 end
 
+@inline function _get_X2_val(X, n1, n2, N1, N2)
+    # Branchless Hermitian symmetry reconstruction for 2D RFFT
+    # Avoids warp divergence on GPU by using predicated execution
+    half_N1 = N1 ÷ 2
+    use_sym = n1 > half_N1
+    
+    # Direct indices
+    i1_d = n1 + 1
+    i2_d = n2 + 1
+    
+    # Symmetric indices
+    i1_s = N1 - n1 + 1
+    i2_s = ifelse(n2 == 0, 1, N2 - n2 + 1)
+    
+    # Select indices
+    i1 = ifelse(use_sym, i1_s, i1_d)
+    i2 = ifelse(use_sym, i2_s, i2_d)
+    
+    @inbounds val = X[i1, i2]
+    return ifelse(use_sym, conj(val), val)
+end
+
 @inline function _get_X3_val(X, n1, n2, n3, N1, N2, N3)
     # Branchless Hermitian symmetry reconstruction
     # Avoids warp divergence on GPU by using predicated execution

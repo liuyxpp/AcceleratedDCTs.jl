@@ -22,7 +22,7 @@ println("="^60)
 println()
 
 # Setup
-N = 384
+N = 256
 println("Grid size: $(N)x$(N)x$(N)")
 
 # Check available memory
