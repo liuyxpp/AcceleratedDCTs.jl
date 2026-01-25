@@ -37,6 +37,6 @@ y = 2 \operatorname{Re} \{ W_3 \cdot [ W_2 \cdot ( W_1 \cdot X + \dots ) + \dots
 
 This is implemented efficiently in a single kernel pass in `src/dct_optimized.jl`.
 
-## Core Innovation
+## Major Contribution
 
-The core innovation of this package is the implementation of **Algorithm 2 (2D)** and **Algorithm 3 (3D)**, which reduce $N$-dimensional DCTs to $N$-dimensional Real-to-Complex (R2C) FFTs with $O(N)$ pre/post-processing steps, avoiding the overhead of separable 1D transforms (which require redundant transposes).
+The major contribution of this package is the implementation of **Algorithm 2 (2D)** and **Algorithm 3 (3D)** in pure Julia in a device agnostic way, which reduce $N$-dimensional DCTs to $N$-dimensional Real-to-Complex (R2C) FFTs with $O(N)$ pre/post-processing steps, avoiding the overhead of separable 1D transforms (which require redundant transposes). In particular, the 3D version is the first implementation of Algorithm 3 to the best of our knowledge.
