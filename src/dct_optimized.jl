@@ -344,7 +344,7 @@ end
 
         # Eq 10: y(n) = 2Re(W * X(n))
 
-        y[n+1] = 2 * real(W * val1)
+        y[n+1] = real(W * val1)
     end
 end
 
@@ -382,8 +382,7 @@ end
         dest = ifelse(iseven(k), k ÷ 2, N - (k + 1) ÷ 2)
 
         # 0.5 scaling
-        T = eltype(y)
-        y[k+1] = T(0.5) * v[dest+1]
+        y[k+1] = v[dest+1]
     end
 end
 
@@ -432,7 +431,8 @@ end
         val2 = _get_X2_val(X, n1_b, n2, N1, N2)
 
         term = W1 * val1 + conj(W1) * val2
-        y[n1+1, n2+1] = 2 * real(W2 * term)
+        T = eltype(y)
+        y[n1+1, n2+1] = T(0.5) * real(W2 * term)
     end
 end
 
@@ -487,8 +487,7 @@ end
         idx2 = ifelse(iseven(n2), n2 ÷ 2, N2 - (n2 + 1) ÷ 2)
 
         # 0.25 scaling (type-correct)
-        T = eltype(y)
-        y[n1+1, n2+1] = T(0.25) * v[idx1+1, idx2+1]
+        y[n1+1, n2+1] = v[idx1+1, idx2+1]
     end
 end
 
@@ -539,7 +538,8 @@ end
         phi1_B = W1 * v3 + conj(W1) * v4
 
         inner = W2 * phi1_A + conj(W2) * phi1_B
-        y[n1+1, n2+1, n3+1] = 2 * real(W3 * inner)
+        T = eltype(y)
+        y[n1+1, n2+1, n3+1] = T(0.25) * real(W3 * inner)
     end
 end
 
@@ -581,8 +581,7 @@ end
         idx3 = ifelse(iseven(n3), n3 ÷ 2, N3 - (n3 + 1) ÷ 2)
 
         # 0.125 scaling (type-correct)
-        T = eltype(y)
-        y[n1+1, n2+1, n3+1] = T(0.125) * v[idx1+1, idx2+1, idx3+1]
+        y[n1+1, n2+1, n3+1] = v[idx1+1, idx2+1, idx3+1]
     end
 end
 

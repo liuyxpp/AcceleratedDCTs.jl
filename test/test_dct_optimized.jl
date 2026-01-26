@@ -47,8 +47,8 @@ using Statistics
         y_opt = dct(x)
         ratio = y_opt ./ y_ref
 
-        # Check if ratio is consistently 2.0
-        @test all(isapprox.(ratio, 2.0, atol=1e-5))
+        # Check if ratio is consistently 1.0
+        @test all(isapprox.(ratio, 1.0, atol=1e-5))
     end
 
     @testset "Float32" begin
@@ -151,8 +151,8 @@ end
     end
 
     @testset "Consistency with Reference DCT" begin
-        # Algorithm 2 implementation has a scaling factor compared to standard DCT-II
-        # We observed a factor of 4.0 in manual verification
+        # Algorithm 2 implementation now matches the standard "Pure Sum" DCT-II definition
+        # Ratio should be 1.0
 
         N1, N2 = 8, 8
         x = rand(N1, N2)
@@ -163,11 +163,11 @@ end
         # Optimized implementation
         y_opt = dct(x)
 
-        # Check scaling factor is consistently 4.0
+        # Check scaling factor is consistently 1.0
         ratio = y_opt ./ y_ref
 
         # Allow some epsilon variance due to floating point
-        @test all(isapprox.(ratio, 4.0, atol=1e-5))
+        @test all(isapprox.(ratio, 1.0, atol=1e-5))
     end
 
     @testset "Float32" begin
@@ -214,13 +214,12 @@ end
     end
 
     @testset "Consistency with Reference DCT" begin
-        # 2D has factor 4. 3D should have factor 8?
         N1, N2, N3 = 4, 4, 4
         x = rand(N1, N2, N3)
         y_ref = dct3d(x)
         y_opt = dct(x)
         ratio = y_opt ./ y_ref
-        @test all(isapprox.(ratio, 8.0, atol=1e-5))
+        @test all(isapprox.(ratio, 1.0, atol=1e-5))
     end
 
     @testset "Float32" begin
