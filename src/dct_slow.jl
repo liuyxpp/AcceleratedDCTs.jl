@@ -23,23 +23,29 @@ Uses FFT-based computation:
 3. Apply twiddle factors: y[k] = Re(V[k] * exp(-jπk/(2N)))
 
 # Arguments
-- `x`: Input vector of length N (must be even)
+- `x`: Input vector of length N
 
 # Returns
 - DCT coefficients vector of length N
 """
 function dct1d(x::AbstractVector{T}) where T<:Real
     N = length(x)
-    @assert iseven(N) "Length must be even"
-    halfN = N ÷ 2
+    # Generic implementation for any N (Makhoul's algorithm generalized)
     
     # Step 1: Preprocess (reorder)
     v = similar(x)
-    @inbounds for n in 0:N-1
-        if n < halfN
-            v[n+1] = x[2*n + 1]      # x[2n] in 0-indexed
+    
+    # For N=even: v[n] = x[2n], v[N-1-n] = x[2n+1]
+    # General logic:
+    # First ceil(N/2) elements of v are even indices of x: x[0], x[2], ...
+    # Remaining elements are odd indices of x in reverse: ..., x[3], x[1]
+    
+    limit = div(N + 1, 2)
+    @inbounds for n in 1:N
+        if n <= limit
+            v[n] = x[2n - 1]        # x[2(n-1)]
         else
-            v[n+1] = x[2*N - 2*n]    # x[2N-2n-1] in 0-indexed, +1 for Julia
+            v[n] = x[2(N - n) + 2]  # Maps end of v to odd indices x[1], x[3]...
         end
     end
     
@@ -69,37 +75,46 @@ Uses FFT-based computation:
 3. Inverse reorder to get original signal
 
 # Arguments
-- `y`: DCT coefficients vector of length N (must be even)
+- `y`: DCT coefficients vector of length N
 
 # Returns
 - Reconstructed signal vector of length N
 """
 function idct1d(y::AbstractVector{T}) where T<:Real
     N = length(y)
-    @assert iseven(N) "Length must be even"
-    halfN = N ÷ 2
     
     # Step 1: Reconstruct V from y
-    # For k in 1:halfN-1: V[k] = (y[k] - j*y[N-k]) * conj(expk[k])
-    # where expk[k] = exp(-jπk/(2N))
+    # For k in 1:ceil(N/2)-1 ...
     V = zeros(Complex{T}, N)
     
     # DC component (k=0)
     V[1] = Complex{T}(y[1], zero(T))
     
-    # k = 1 to halfN-1
-    @inbounds for k in 1:halfN-1
+    # k loops up to (N-1)÷2
+    limit = div(N - 1, 2)
+    @inbounds for k in 1:limit
         expk_inv = cis(T(π) * k / (2*N))  # conj(exp(-jπk/(2N)))
         # Z[k] = y[k] - j*y[N-k], then V[k] = Z[k] * expk_inv
         V[k+1] = (y[k+1] - im*y[N-k+1]) * expk_inv
     end
     
-    # Nyquist component (k = N/2)
-    # V[N/2] is real, and y[N/2] = V[N/2] * cos(π/4) = V[N/2]/√2
-    V[halfN+1] = Complex{T}(y[halfN+1] * sqrt(T(2)), zero(T))
+    # Nyquist component (k = N/2) - only exists if N is even
+    if iseven(N)
+        halfN = N ÷ 2
+        # V[N/2] is real, and y[N/2] = V[N/2] * cos(π/4) = V[N/2]/√2
+        V[halfN+1] = Complex{T}(y[halfN+1] * sqrt(T(2)), zero(T))
+    end
     
     # Hermitian symmetry: V[N-k] = conj(V[k])
-    @inbounds for k in halfN+1:N-1
+    # Compute limit for symmetry copy
+    # If N is even, symmetry starts after Nyquist: N/2 + 1
+    # If N is odd, symmetry starts after last processed k: (N-1)/2 + 1
+    start_sym = div(N, 2) + 2
+    if isodd(N)
+        start_sym = div(N - 1, 2) + 2
+    end
+
+    @inbounds for k in (start_sym-1):N-1
         V[k+1] = conj(V[N-k+1])
     end
     
@@ -107,12 +122,14 @@ function idct1d(y::AbstractVector{T}) where T<:Real
     v = ifft(V)
     
     # Step 3: Inverse reorder
+    # Reverse of Step 1 in dct1d
     x = similar(y)
-    @inbounds for n in 0:N-1
-        if n < halfN
-            x[2*n + 1] = real(v[n+1])
+    split = div(N + 1, 2)
+    @inbounds for n in 1:N
+        if n <= split
+            x[2n - 1] = real(v[n])
         else
-            x[2*N - 2*n] = real(v[n+1])
+            x[2(N - n) + 2] = real(v[n])
         end
     end
     
@@ -136,7 +153,7 @@ Uses separable 1D DCT transforms:
 2. Apply 1D DCT to each column
 
 # Arguments
-- `x`: Input matrix of size M×N (M and N must be even)
+- `x`: Input matrix of size M×N
 
 # Returns
 - DCT coefficients matrix of size M×N
@@ -169,7 +186,7 @@ Uses separable 1D IDCT transforms:
 2. Apply 1D IDCT to each row
 
 # Arguments
-- `y`: DCT coefficients matrix of size M×N (M and N must be even)
+- `y`: DCT coefficients matrix of size M×N
 
 # Returns
 - Reconstructed signal matrix of size M×N
@@ -206,7 +223,7 @@ Uses separable 1D DCT transforms:
 3. Apply 1D DCT along dimension 3 (depth)
 
 # Arguments
-- `x`: Input array of size L×M×N (all dimensions must be even)
+- `x`: Input array of size L×M×N
 
 # Returns
 - DCT coefficients array of size L×M×N
@@ -249,7 +266,7 @@ Uses separable 1D IDCT transforms:
 3. Apply 1D IDCT along dimension 1 (rows)
 
 # Arguments
-- `y`: DCT coefficients array of size L×M×N (all dimensions must be even)
+- `y`: DCT coefficients array of size L×M×N
 
 # Returns
 - Reconstructed signal array of size L×M×N
