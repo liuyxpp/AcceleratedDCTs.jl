@@ -10,3 +10,5 @@ coverage
 docs/build/
 env
 node_modules
+docs/design/*.cu
+docs/design/*.jl

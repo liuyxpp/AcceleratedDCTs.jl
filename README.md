@@ -35,7 +35,7 @@ using CUDA
 
 # 1. Create Data
 N = 128
-x_gpu = CUDA.rand(Float64, N, N, N)
+x_gpu = CUDA.rand(Float64, N, N, N)  # can be any Real, e.g. Float32
 
 # 2. Create Optimized Plan (Recommended)
 p = plan_dct(x_gpu)
@@ -103,7 +103,15 @@ Lower is better.
 
 ## Documentation
 
-For detailed theory, algorithm explanation, and advanced usage, see [docs/Documentation.md](docs/Documentation.md).
+Comprehensive documentation is available at [https://liuyxpp.github.io/AcceleratedDCTs.jl/dev/](https://liuyxpp.github.io/AcceleratedDCTs.jl/dev/).
+
+The documentation includes:
+*   [**Quick Start & Tutorial**](https://liuyxpp.github.io/AcceleratedDCTs.jl/dev/10-tutorial/): Usage examples and the plan-based API.
+*   [**Theory & Algorithms**](https://liuyxpp.github.io/AcceleratedDCTs.jl/dev/20-theory/): Mathematical background of Makhoul's algorithm.
+*   [**Implementation Details**](https://liuyxpp.github.io/AcceleratedDCTs.jl/dev/30-implementation/): Insights into `KernelAbstractions` and buffer management.
+*   [**Benchmarks**](https://liuyxpp.github.io/AcceleratedDCTs.jl/dev/40-benchmarks/): In-depth performance analysis on CPU and GPU.
+*   [**API Reference**](https://liuyxpp.github.io/AcceleratedDCTs.jl/dev/95-reference/): Detailed function documentation.
+
 
 ## AI Usage Disclaimer
 
