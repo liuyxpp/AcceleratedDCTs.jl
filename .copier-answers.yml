@@ -1,10 +1,10 @@
 # Changes here will be overwritten by Copier
-Authors: lyx
+Authors: Yixin Liu (lyx@fudan.edu.cn)
 JuliaMinVersion: '1.10'
 License: MIT
-LicenseCopyrightHolders: lyx
+LicenseCopyrightHolders: Yixin Liu
 PackageName: AcceleratedDCTs
-PackageOwner: lyx
+PackageOwner: liuyxpp
 PackageUUID: 16e42a1c-b1d1-5566-807a-fe3b9ee7f6e1
 StrategyConfirmIncluded: false
 StrategyLevel: 1
