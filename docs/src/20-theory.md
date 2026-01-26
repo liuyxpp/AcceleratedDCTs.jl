@@ -1,9 +1,18 @@
 # Theory & Algorithms
 
-## The General Idea (Makhoul's Algorithm)
+The aim of this package is to provide a fast, device-agnostic, and abstract interface for computing the following 1D, 2D, and 3D DCTs (DCT-II and DCT-III):
 
-- See https://arxiv.org/abs/2110.01172 for detailed algorithms for 1D & 2D DCTs.
-- CUDA C implementation: https://github.com/JeremieMelo/dct_cuda
+**Forward Transform (DCT-II)**
+```math
+X_k = \sum_{n=0}^{N-1} x_n \cos\left(\frac{\pi}{N}\left(n+\frac{1}{2}\right)k\right)
+```
+
+**Inverse Transform (DCT-III)**
+```math
+x_n = \frac{1}{2}X_0 + \sum_{k=1}^{N-1} X_k \cos\left(\frac{\pi}{N}n\left(k+\frac{1}{2}\right)\right)
+```
+
+## The General Idea of Implementation (Makhoul's Algorithm)
 
 A standard DCT-II of length $N$ can be computed by:
 1.  **Preprocessing**: Permuting the input sequence $x$ into a new sequence $x'$.
@@ -40,3 +49,9 @@ This is implemented efficiently in a single kernel pass in `src/dct_optimized.jl
 ## Major Contribution
 
 The major contribution of this package is the implementation of **Algorithm 2 (2D)** and **Algorithm 3 (3D)** in pure Julia in a device agnostic way, which reduce $N$-dimensional DCTs to $N$-dimensional Real-to-Complex (R2C) FFTs with $O(N)$ pre/post-processing steps, avoiding the overhead of separable 1D transforms (which require redundant transposes). In particular, the 3D version is the first implementation of Algorithm 3 to the best of our knowledge.
+
+## References
+
+- J. Makhoul, “A fast cosine transform in one and two dimensions,” IEEE Transactions on Acoustics, Speech, and Signal Processing, 1980.
+- See also https://arxiv.org/abs/2110.01172 for detailed algorithms for 1D & 2D DCTs.
+- And their CUDA C implementation (1D & 2D): https://github.com/JeremieMelo/dct_cuda

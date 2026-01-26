@@ -1,10 +1,6 @@
-这是一个非常好的数学与算法扩展问题。Algorithm 2 描述的是一种经典的通过**FFT（快速傅里叶变换）**来计算**DCT-II（离散余弦变换）**的方法。这种方法通常被称为 **Makhoul 算法** 的二维扩展。
+## Fast Discrete Cosine Transforms (3D)
 
-要将其扩展到 **3D (三维)**，我们需要利用 DCT 和 FFT 的可分离性，将预处理（Preprocessing）和后处理（Postprocessing）逻辑递归地应用到第三个维度。
-
-以下是为您定制的 **Algorithm 3: 3D DCT, 3D IDCT with N-Point 3D FFT**。
-
----
+source: Gemini Pro 3.0
 
 ### 核心逻辑推导
 
@@ -69,11 +65,7 @@ $$
 \text{where map } \sigma_k(n) = \begin{cases} n/2, & n \text{ is even} \\ N_k - (n+1)/2, & n \text{ is odd} \end{cases}
 $$
 
----
-
 ### 详细数学推导解释
-
-为了便于您理解和实现，以下是对上述公式的详细解释：
 
 #### 1. 3D DCT Preprocess (输入重排)
 这一步将 3D 网格划分为 8 个卦限。对于每个维度 $k \in \{1, 2, 3\}$，如果是前半部分数据，取偶数索引；如果是后半部分数据，取倒序的奇数索引。这使得经过 FFT 后，频域数据包含了 DCT 所需的对称分量。
