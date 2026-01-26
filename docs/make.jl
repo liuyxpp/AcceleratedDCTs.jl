@@ -7,6 +7,7 @@ DocMeta.setdocmeta!(AcceleratedDCTs, :DocTestSetup, :(using AcceleratedDCTs); re
 const titles = Dict(
     "10-tutorial.md" => "Tutorial",
     "20-theory.md" => "Theory",
+    "25-normalization.md" => "Normalization",
     "30-implementation.md" => "Implementation",
     "40-benchmarks.md" => "Benchmarks",
     "50-troubleshooting.md" => "Troubleshooting",
