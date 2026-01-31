@@ -6,6 +6,7 @@
 .benchmarkci
 Manifest.toml
 benchmark/*.json
+benchmark/*.log
 coverage
 docs/build/
 env
