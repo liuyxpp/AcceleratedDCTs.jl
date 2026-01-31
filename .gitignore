@@ -12,3 +12,5 @@ env
 node_modules
 docs/design/*.cu
 docs/design/*.jl
+docs/announcement.md
+docs/tweet.md
