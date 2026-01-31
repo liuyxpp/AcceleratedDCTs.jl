@@ -6,9 +6,12 @@
 .benchmarkci
 Manifest.toml
 benchmark/*.json
+benchmark/*.log
 coverage
 docs/build/
 env
 node_modules
 docs/design/*.cu
 docs/design/*.jl
+docs/announcement.md
+docs/tweet.md

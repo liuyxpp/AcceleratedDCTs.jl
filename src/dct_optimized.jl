@@ -33,8 +33,6 @@ end
 # Properties
 Base.ndims(::DCTPlan{T, N}) where {T, N} = N
 Base.ndims(::IDCTPlan{T, N}) where {T, N} = N
-
-# Properties
 Base.size(p::DCTPlan) = size(p.tmp_real)
 Base.size(p::IDCTPlan) = size(p.tmp_real)
 Base.eltype(::DCTPlan{T}) where T = T
@@ -296,8 +294,7 @@ function LinearAlgebra.mul!(y::AbstractArray, p::IDCTPlan{T, 3}, x::AbstractArra
     mul!(p.tmp_real, p.complex_plan, p.tmp_comp)
 
     # 3. Postprocess
-    idct_3d_postprocess_kernel!(backend)(
-        y, p.tmp_real, N1, N2, N3;
+    idct_3d_postprocess_kernel!(backend)(y, p.tmp_real, N1, N2, N3;
         ndrange=(N1, N2, N3),
         workgroupsize=(8, 8, 4)
     )
@@ -306,16 +303,10 @@ function LinearAlgebra.mul!(y::AbstractArray, p::IDCTPlan{T, 3}, x::AbstractArra
 end
 
 # Support ldiv!(y, plan, x) => mul!(y, inv(plan), x)
-function LinearAlgebra.ldiv!(y::AbstractArray, p::DCTPlan, x::AbstractArray)
+function LinearAlgebra.ldiv!(y::AbstractArray, p::Union{DCTPlan, IDCTPlan}, x::AbstractArray)
     inv_p = inv(p)
     mul!(y, inv_p, x)
 end
-
-function LinearAlgebra.ldiv!(y::AbstractArray, p::IDCTPlan, x::AbstractArray)
-    inv_p = inv(p)
-    mul!(y, inv_p, x)
-end
-
 
 # ============================================================================
 # 1D Kernels

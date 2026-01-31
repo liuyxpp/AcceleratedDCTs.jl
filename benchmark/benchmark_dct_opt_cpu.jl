@@ -18,7 +18,11 @@ push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 using AcceleratedDCTs
 using AcceleratedDCTs: plan_dct, dct_batched
 
-
+# Setup FFTW multi-threading
+nthreads = Threads.nthreads()
+FFTW.set_num_threads(nthreads)
+println("FFTW using $nthreads threads")
+println()
 # Benchmark function for CPU
 function benchmark_cpu(f, x; n_warmup=3, n_samples=10)
     # Warmup
