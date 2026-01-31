@@ -9,7 +9,11 @@
 
 **Fast, Device-Agnostic, AbstractFFTs-compatible DCT library for Julia.**
 
-AcceleratedDCTs.jl provides highly optimized Discrete Cosine Transform (DCT-II) and Inverse DCT (DCT-III) implementations for 1D, 2D and 3D data. It leverages **KernelAbstractions.jl** to run efficiently on both CPUs (multithreaded) and GPUs (CUDA, AMD, etc.), and implements the **AbstractFFTs.jl** interface for easy integration.
+AcceleratedDCTs.jl provides highly optimized Discrete Cosine Transform implementations for 1D, 2D and 3D data:
+*   **DCT-II** (Standard "DCT") and **DCT-III** (Inverse DCT)
+*   **DCT-I** and **IDCT-I** (symmetric boundary conditions)
+
+It leverages **KernelAbstractions.jl** to run efficiently on both CPUs (multithreaded) and GPUs (CUDA, AMD, etc.), and implements the **AbstractFFTs.jl** interface for easy integration.
 
 ## Key Features
 
@@ -60,6 +64,21 @@ using AcceleratedDCTs: dct, idct
 
 y = dct(x_gpu)
 x_rec = idct(y)
+```
+
+### DCT-I (Symmetric Boundary)
+
+```julia
+using AcceleratedDCTs: dct1, idct1, plan_dct1
+
+# One-shot
+y = dct1(x_gpu)
+x_rec = idct1(y)
+
+# Plan-based (recommended for repeated use)
+p = plan_dct1(x_gpu)
+y = p * x_gpu
+x_rec = p \ y
 ```
 
 ## Benchmarks

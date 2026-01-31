@@ -10,10 +10,20 @@ We strictly avoid "scalar indexing" (accessing single elements from the host), e
 
 ## Plan-Based API (AbstractFFTs)
 To maximize performance, we separate **resource allocation** (cheap on CPU, expensive on GPU) from **execution**.
-*   **`plan_dct(x)`**:
+
+### DCT-II/DCT-III Plans
+*   **`plan_dct(x)`** / **`plan_idct(x)`**:
     *   Allocates temporary buffers (`tmp_real`, `tmp_comp`).
     *   Creates an internal FFT plan (`plan_rfft`).
     *   Pre-calculates twiddle factors (`cispi(...)`) on the device.
+
+### DCT-I Plans
+*   **`plan_dct1(x)`** / **`plan_idct1(x)`**:
+    *   Allocates mirroring buffer of size `2M-2` per dimension.
+    *   Creates an internal R2C FFT plan.
+    *   No twiddle factors needed (uses direct FFT extraction).
+
+### Execution
 *   **`mul!(y, p, x)`**:
     *   Reuses all buffers.
     *   Zero memory allocation during execution.
