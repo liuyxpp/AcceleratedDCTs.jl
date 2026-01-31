@@ -1,4 +1,5 @@
 import FFTW
+import AbstractFFTs
 using Test
 using AcceleratedDCTs
 using AcceleratedDCTs: dct1, idct1, plan_dct1, plan_idct1, DCT1Plan, IDCT1Plan
@@ -46,7 +47,7 @@ end
 
         # Plan creation
         p = plan_idct1(x)
-        @test p isa IDCT1Plan
+        @test p isa AbstractFFTs.Plan{Float64}
 
         # Inverse transform
         y = p * x
@@ -67,7 +68,7 @@ end
 
         # Explicit inverse plan
         p_inv = inv(p)
-        @test p_inv isa DCT1Plan
+        @test p_inv isa AbstractFFTs.Plan{Float64}
         x_inv = p_inv * y
         @test x_inv ≈ x atol=1e-12
 
@@ -117,7 +118,7 @@ end
 
         # Plan creation
         p = plan_idct1(x)
-        @test p isa IDCT1Plan
+        @test p isa AbstractFFTs.Plan{Float64}
 
         # Inverse transform
         y = p * x
@@ -138,7 +139,7 @@ end
 
         # Explicit inverse plan
         p_inv = inv(p)
-        @test p_inv isa DCT1Plan
+        @test p_inv isa AbstractFFTs.Plan{Float64}
         x_inv = p_inv * y
         @test x_inv ≈ x atol=1e-12
     end
@@ -195,7 +196,7 @@ end
 
         # Plan creation
         p = plan_idct1(x)
-        @test p isa IDCT1Plan
+        @test p isa AbstractFFTs.Plan{Float64}
 
         # Inverse transform
         y = p * x
@@ -216,7 +217,7 @@ end
 
         # Explicit inverse plan
         p_inv = inv(p)
-        @test p_inv isa DCT1Plan
+        @test p_inv isa AbstractFFTs.Plan{Float64}
         x_inv = p_inv * y
         @test x_inv ≈ x atol=1e-12
     end
