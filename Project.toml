@@ -1,6 +1,6 @@
 name = "AcceleratedDCTs"
 uuid = "16e42a1c-b1d1-5566-807a-fe3b9ee7f6e1"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Yi-Xin Liu <lyx@fudan.edu.cn> and contributors"]
 
 [workspace]
