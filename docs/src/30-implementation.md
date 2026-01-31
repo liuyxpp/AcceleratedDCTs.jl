@@ -19,9 +19,9 @@ To maximize performance, we separate **resource allocation** (cheap on CPU, expe
 
 ### DCT-I Plans
 *   **`plan_dct1(x)`** / **`plan_idct1(x)`**:
-    *   Allocates mirroring buffer of size `2M-2` per dimension.
-    *   Creates an internal R2C FFT plan.
-    *   No twiddle factors needed (uses direct FFT extraction).
+    *   **CPU (`Array`)**: Uses FFTW's native `REDFT00` for optimal performance.
+    *   **GPU (`CuArray`)**: Uses mirroring buffer (size `2M-2`) + R2C FFT.
+    *   Dispatch is automatic based on array type.
 
 ### Execution
 *   **`mul!(y, p, x)`**:

@@ -80,4 +80,4 @@ Comparing against `FFTW`'s native DCT-I (`REDFT00`).
 | **$128^3$** | 1839.493 ms | **118.878 ms** | 99.294 ms |
 | **$256^3$** | 140.238 ms | **679.484 ms** | 529.750 ms |
 
-> **Note**: For DCT-I on CPU, `FFTW`'s dedicated `REDFT00` solver is currently faster than our approach (which builds on `rfft`). Our implementation's primary advantage is **device agnosticism** (working on GPUs where no valid DCT-I exists) and integration into the AbstractFFTs ecosystem. The performance gap is mainly due to the memory bandwidth cost of the explicit mirroring step in `src/dct1_optimized.jl` versus FFTW's potentially implicit handling. Also note the abnormal performance at $128^3$ for the FFTW DCT-I.
+> **Note**: The above tables show performance of the **original** `rfft`-based DCT-I implementation. Since then, we have updated the CPU implementation to use FFTW's native `REDFT00` directly via automatic dispatch, achieving **identical performance** to `FFTW DCT-I`. The GPU implementation continues to use the mirroring + FFT approach (no native DCT-I in cuFFT). Also note the abnormal performance at $128^3$ for the FFTW DCT-I in the 8-thread benchmark.
