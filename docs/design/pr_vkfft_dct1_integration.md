@@ -17,7 +17,7 @@ The integration is implemented as a **Julia Package Extension** (`VkDCTExt`), wh
 
 ## ⚠️ Breaking Changes
 
-**YES**. This PR changes the default behavior for `plan_dct1` with `CuArray` inputs.
+This PR changes the default behavior for `plan_dct1` with `CuArray` inputs.
 
 -   **Constraint**: The pure Julia/KernelAbstractions implementation for GPU is **replaced** by the `VkDCT` backend when `CUDA` is loaded.
 -   **Requirement**: Users **MUST** manually compile the underlying C++ library (`libvkfft_dct.so`) for the function to work.
