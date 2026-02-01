@@ -66,14 +66,31 @@ The major contribution of this package is the implementation of **Algorithm 2 (2
 
 ## DCT-I Algorithm
 
-The DCT-I is computed using a **symmetric extension + FFT** approach:
+### Optimized Separable Algorithm (Default)
 
-1.  **Mirroring**: Extend the input $X$ of length $M$ into a symmetric sequence of length $N = 2M-2$:
-    $$g = [X_0, X_1, \ldots, X_{M-1}, X_{M-2}, \ldots, X_1]$$
-2.  **FFT**: Compute the Real FFT of the mirrored sequence.
-3.  **Extraction**: Take the real part of the first $M$ FFT coefficients.
+The default DCT-I implementation uses a **Separable Split-Radix** algorithm which maps a DCT-I of length $M$ to a *Complex* FFT of length $N = M-1$. This avoids the $2 \times$ data expansion of the mirroring approach.
 
-This approach leverages optimized R2C FFT libraries and is implemented in `src/dct1_optimized.jl`.
+1.  **Folding (Pre-processing)**:
+    The input sequence $x$ is folded into a complex sequence $z$ of length $N$:
+    $$ z_n = x_{2n} + i x_{2n+1} $$
+    Boundary conditions ($x_{2n}$ when $2n > N$) are handled by symmetric reflection.
+
+2.  **FFT**:
+    Compute the N-point Complex FFT of $z$.
+
+3.  **Unfolding (Post-processing)**:
+    Reconstruct the DCT coefficients $y$ using split-radix properties:
+    $$ G_k = \operatorname{Re} \left[ Z_k - i W_N^k (Z_k - Z_{N-k}^*) \right] $$
+    where $W_N = e^{-i \pi / N}$.
+
+For N-dimensional data, this 1D process is applied **separably** to each dimension (using batched FFTs via `plan_fft!(v, dim)`), ensuring memory usage scales as $O(M^D)$ rather than $O((2M)^D)$.
+
+### Mirroring Algorithm (Alternative)
+
+We also provide the classical "Mirroring" approach (`dct1_mirror`), which extends the input $X$ of length $M$ into a symmetric sequence of length $N_{mirror} = 2M-2$:
+$$g = [X_0, X_1, \ldots, X_{M-1}, X_{M-2}, \ldots, X_1]$$
+
+This is computed via a Real FFT of length $2M-2$. While conceptually simple, it consumes significantly more memory ($2^D \times$ overhead) for multi-dimensional data.
 
 ## References
 

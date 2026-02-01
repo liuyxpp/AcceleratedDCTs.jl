@@ -43,6 +43,8 @@ y = dct1(x)
 x_rec = idct1(y)
 ```
 
+> **Note**: `dct1` uses an efficient **Separable** algorithm by default ($O(M)$ memory). If you need the legacy **Mirroring** algorithm ($O(2M)$ memory), use `dct1_mirror` / `plan_dct1_mirror`.
+
 ---
 
 ## Performance API (Plan-Based)

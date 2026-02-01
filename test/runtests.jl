@@ -17,5 +17,5 @@ using LinearAlgebra
     include("test_dct_optimized.jl")
 
     # DCT-I
-    include("test_dct1_optimized.jl")
+    include("test_dct1_separable.jl")
 end
