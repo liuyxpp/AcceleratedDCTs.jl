@@ -12,9 +12,11 @@ The core innovation of this package is the implementation of **Algorithm 2 (2D)*
 
 ## Key Features
 
-*   **⚡ High Performance**: optimized algorithms (Makhoul's method) that outperform standard separable approaches on GPU (~2x speedup for 3D) and CPU (~3x speedup for 3D).
-*   **🧠 efficient DCT-I**: New separable split-radix algorithm for DCT-I that avoids memory expansion ($O(M)$ vs old $O(2M)$).
+*   **⚡ High Performance**: optimized algorithms (Makhoul's method) that outperform standard separable approaches.
+*   **🧠 Efficient DCT-I**: New separable split-radix algorithm for DCT-I that avoids memory expansion ($O(M)$ vs old $O(2M)$).
 *   **🚀 Device Agnostic**: Runs on CPU (Threads) and GPU (`CuArray`, `ROCArray` via `KernelAbstractions`).
+*   **🔥 VkDCT Backend**: Optional experimental C++/Vulkan backend for DCT-I offering **~15x speedup** on GPU compared to the pure Julia implementation.
 *   **🧩 AbstractFFTs Compatible**: Zero-allocation `mul!`, `ldiv!`, and precomputed `Plan` support.
+*   **📦 3D Optimized**: Specialized 3D kernels that avoid redundant transposes.
 *   **📦 3D Optimized**: Specialized 3D kernels that avoid redundant transposes.
 

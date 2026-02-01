@@ -17,8 +17,9 @@ It leverages **KernelAbstractions.jl** to run efficiently on both CPUs (multithr
 
 ## Key Features
 
-*   **⚡ High Performance**: optimized algorithms (Makhoul's method) that outperform standard separable approaches on GPU (~2x speedup for 3D) and CPU (~3x speedup for 3D).
+*   **⚡ High Performance**: optimized algorithms (Makhoul's method) that outperform standard separable approaches.
 *   **🚀 Device Agnostic**: Runs on CPU (Threads) and GPU (`CuArray`, `ROCArray` via `KernelAbstractions`).
+*   **🔥 VkDCT Backend**: Optional experimental C++/Vulkan backend for DCT-I offering **~15x speedup** on GPU compared to the pure Julia implementation.
 *   **🧩 AbstractFFTs Compatible**: Zero-allocation `mul!`, `ldiv!`, and precomputed `Plan` support.
 *   **📦 3D Optimized**: Specialized 3D kernels that avoid redundant transposes.
 
@@ -111,6 +112,27 @@ Measurement of **3D DCT-I** performance. Compares `Opt DCT-I` against raw `cuFFT
 | **$256^3$** | 88.519 ms | **92.446 ms** | ~1.04x |
 
 > **Note**: Our optimized DCT-I implementation adds minimal overhead (<5% at large sizes) over the raw FFT, demonstrating extremely efficient kernel implementation.
+ 
+## VkDCT Extension (High Performance GPU DCT-I)
+
+For maximum performance on NVIDIA GPUs (providing **7x-15x speedup** over the device-agnostic backend), you can compile the optional `VkDCT` library.
+
+**Setup**:
+1.  Ensure you have `cmake` and `nvcc` (CUDA Toolkit) installed.
+2.  Run the compilation script:
+    ```bash
+    cd lib/VkDCT
+    ./compile.sh
+    ```
+3.  Load `CUDA` in your Julia session. The extension `VkDCTExt` will automatically load and accelerate `plan_dct1` for `CuArray`.
+
+```julia
+using AcceleratedDCTs
+using CUDA
+
+# Automatically uses VkDCT if compiled
+p = plan_dct1(CuArray(rand(128, 128, 128))) 
+```
 
 ## Documentation
 

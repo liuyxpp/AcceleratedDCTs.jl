@@ -54,6 +54,26 @@ We compare the new **Separable DCT-I** against the legacy **Mirroring** approach
 
 > **Key Takeaway**: The **Separable DCT-I** implementation is highly effective at large scales, outperforming both the Mirroring method and the raw Complex FFT baseline. It achieves this by using an efficient $O(M^D)$ memory footprint and optimized kernels, avoiding the bandwidth bottlenecks of the Mirroring approach. Note that for optimal performance, sizes of the form $M=2^k+1$ (e.g., 129, 257) are recommended, as they map to power-of-two internal FFTs ($N=128, 256$).
 
+### VkDCT Performance (Vulkan/CUDA Backend)
+
+Using the `VkDCTExt` extension with `libvkfft_dct.so` (C++ backend) yields **massive speedups**.
+
+**Float32 Performance:**
+
+| Grid Size ($M^3$) | `cuFFT` (Baseline) | `AcceleratedDCTs` (Separable) | **`VkDCT` (Extension)** | Speedup vs Separable |
+| :--- | :--- | :--- | :--- | :--- |
+| **$65^3$** | 0.108 ms | 0.443 ms | **0.038 ms** | **11.7x** |
+| **$129^3$** | 1.063 ms | 2.765 ms | **0.176 ms** | **15.7x** |
+
+**Float64 Performance:**
+
+| Grid Size ($M^3$) | `cuFFT` (Baseline) | `AcceleratedDCTs` (Separable) | **`VkDCT` (Extension)** | Speedup vs Separable |
+| :--- | :--- | :--- | :--- | :--- |
+| **$65^3$** | 0.591 ms | 0.510 ms | **0.222 ms** | **2.3x** |
+| **$129^3$** | 4.341 ms | 3.608 ms | **1.849 ms** | **1.95x** |
+
+> **Analysis**: VkDCT is 7x-15x faster than the generic Julia GPU implementation for Float32, and ~2x faster for Float64. It even outperforms raw `cuFFT` significantly for non-power-of-two sizes ($M=2^k+1$).
+
 ### CPU Performance (Intel Xeon Gold 6132)
 
 Comparing against `FFTW`'s native DCT-I (`REDFT00`).

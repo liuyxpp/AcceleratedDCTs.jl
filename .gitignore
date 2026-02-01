@@ -15,3 +15,6 @@ docs/design/*.cu
 docs/design/*.jl
 docs/announcement.md
 docs/tweet.md
+lib/VkDCT/libvkfft_dct.so
+lib/VkDCT/VkFFT
+lib/VkDCT/vkFFT/*
