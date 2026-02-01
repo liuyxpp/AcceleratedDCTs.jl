@@ -21,6 +21,7 @@ To maximize performance, we separate **resource allocation** (cheap on CPU, expe
 *   **`plan_dct1(x)`** / **`plan_idct1(x)`**:
     *   **Default (GPU/Generic)**: Uses **Separable Split-Radix** algorithm.
         *   Maps $M$ points to size $N=M-1$ Complex FFT.
+        *   **GPU Strategy**: Uses a **Permuted** approach to ensure Unit Stride memory access for internal FFTs across all dimensions, maximizing performance.
         *   Memory scaling: $O(M^D)$ (efficient for N-D).
     *   **CPU (`Array`)**: Uses FFTW's native `REDFT00`.
     *   Dispatch is automatic.

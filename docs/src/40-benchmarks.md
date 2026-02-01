@@ -44,17 +44,15 @@ Measurement of **3D DCT-I** performance on varying grid sizes ($M^3$). Note that
 
 ### GPU Performance (NVIDIA RTX 2080 Ti)
 
-CUDA does not provide a native DCT-I. We compare against a raw `cuFFT` R2C transform of size $(2M-2)^3$ to show the overhead of our implementation (logic + kernels).
+We compare the new **Separable DCT-I** against the legacy **Mirroring** approach and a raw **Complex FFT** baseline (size $2M-2$).
 
-| Grid Size ($M^3$) | `cuFFT rfft` ($N=2M-2$) | **`Opt DCT-I`** | Overhead |
-| :--- | :--- | :--- | :--- |
-| **$16^3$** | 0.079 ms | **0.108 ms** | ~1.36x |
-| **$32^3$** | 0.245 ms | **0.313 ms** | ~1.27x |
-| **$64^3$** | 1.204 ms | **1.323 ms** | ~1.10x |
-| **$128^3$** | 23.289 ms | **23.951 ms** | ~1.03x |
-| **$256^3$** | 88.519 ms | **92.446 ms** | ~1.04x |
+| Grid Size ($M^3$) | Complex FFT ($2M-2$) | **Separable DCT-I** | Mirror DCT-I | Speedup vs Mirror |
+| :--- | :--- | :--- | :--- | :--- |
+| **$65^3$** | 1.44 ms | **2.08 ms** | 1.12 ms | 0.5x |
+| **$129^3$** | 11.11 ms | **5.71 ms** | 7.83 ms | **1.4x** |
+| **$257^3$** | 80.73 ms | **43.50 ms** | 54.89 ms | **1.3x** |
 
-> **Note**: Our optimized DCT-I implementation adds minimal overhead (<5% at large sizes) over the raw FFT, demonstrating extremely efficient kernel implementation.
+> **Key Takeaway**: The **Separable DCT-I** implementation is highly effective at large scales, outperforming both the Mirroring method and the raw Complex FFT baseline. It achieves this by using an efficient $O(M^D)$ memory footprint and optimized kernels, avoiding the bandwidth bottlenecks of the Mirroring approach. Note that for optimal performance, sizes of the form $M=2^k+1$ (e.g., 129, 257) are recommended, as they map to power-of-two internal FFTs ($N=128, 256$).
 
 ### CPU Performance (Intel Xeon Gold 6132)
 
