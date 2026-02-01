@@ -16,7 +16,7 @@ using Printf
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 
 using AcceleratedDCTs
-using AcceleratedDCTs: plan_dct1
+using AcceleratedDCTs: plan_dct1_mirror
 
 # Setup FFTW multi-threading
 nthreads = Threads.nthreads()
@@ -43,7 +43,7 @@ function benchmark_cpu(f, x; n_warmup=3, n_samples=10)
 end
 
 # Sizes to benchmark
-Ms = [16, 32, 64, 128, 256]
+Ms = [32, 33, 64, 65, 128, 129, 256, 257]
 results = []
 
 println("="^60)
@@ -69,7 +69,7 @@ for M in Ms
     x_extended = zeros(Float64, N, N, N)
     
     # Create Plans
-    p_dct1 = plan_dct1(x_cpu)
+    p_dct1 = plan_dct1_mirror(x_cpu)
     p_fftw_dct1 = FFTW.plan_r2r(x_cpu, FFTW.REDFT00)
     p_rfft = plan_rfft(x_extended)
     
@@ -80,18 +80,27 @@ for M in Ms
     println("Done ($t_fftw ms)")
     
     # Measure AcceleratedDCTs DCT-I (mul!)
-    print("  Opt DCT-I (mul!)... ")
+    print("  Mirror DCT-I (mul!)... ")
     times_opt = benchmark_cpu(x -> mul!(y_cpu, p_dct1, x), x_cpu; n_samples=5)
     t_opt = median(times_opt)
     println("Done ($t_opt ms)")
     
     # Measure raw RFFT on 2M-2 size (reference for internal FFT cost)
     print("  FFTW rfft (2M-2)... ")
-    times_rfft = benchmark_cpu(x -> mul!(y_complex, p_rfft, x), x_extended; n_samples=5)
-    t_rfft = median(times_rfft)
-    println("Done ($t_rfft ms)")
+    times_rfft_2m = benchmark_cpu(x -> mul!(y_complex, p_rfft, x), x_extended; n_samples=5)
+    t_rfft_2m = median(times_rfft_2m)
+    println("Done ($t_rfft_2m ms)")
+
+    # Measure raw RFFT on M size (reference for same-size FFT)
+    # Re-use p_fftw_dct1 logic but make a new plan for M-size RFFT
+    p_rfft_m = plan_rfft(x_cpu)
+    y_complex_m = Array{ComplexF64}(undef, (M÷2+1, M, M))
+    print("  FFTW rfft (M)...    ")
+    times_rfft_m = benchmark_cpu(x -> mul!(y_complex_m, p_rfft_m, x), x_cpu; n_samples=5)
+    t_rfft_m = median(times_rfft_m)
+    println("Done ($t_rfft_m ms)")
     
-    push!(results, (M, t_fftw, t_opt, t_rfft))
+    push!(results, (M, t_fftw, t_opt, t_rfft_2m, t_rfft_m))
     
     # Cleanup
     p_dct1 = nothing
@@ -104,11 +113,11 @@ end
 println("="^80)
 println("CPU DCT-I Performance Summary (Time in ms)")
 println("="^80)
-println("| Grid Size | FFTW DCT-I | Opt DCT-I | rfft (2M-2) |")
-println("|-----------|------------|-----------|-------------|")
-for (M, t_fftw, t_opt, t_rfft) in results
-    @printf("| %3d^3     | %10.3f | %9.3f | %11.3f |\n", 
-            M, t_fftw, t_opt, t_rfft)
+println("| Grid Size | FFTW DCT-I | Mirror DCT-I | rfft (2M-2) | rfft (M)    |")
+println("|-----------|------------|--------------|-------------|-------------|")
+for (M, t_fftw, t_opt, t_rfft_2m, t_rfft_m) in results
+    @printf("| %3d^3     | %10.3f | %12.3f | %11.3f | %11.3f |\n", 
+            M, t_fftw, t_opt, t_rfft_2m, t_rfft_m)
 end
 println("="^80)
 

@@ -18,7 +18,7 @@ using LinearAlgebra
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
 
 using AcceleratedDCTs
-using AcceleratedDCTs: plan_dct1
+using AcceleratedDCTs: plan_dct1_mirror, plan_dct1
 
 println("="^60)
 println("Benchmark: DCT-I Performance on GPU")
@@ -83,7 +83,7 @@ function safe_benchmark(name, f, x; n_warmup=2, n_samples=10)
 end
 
 # Sizes to benchmark
-Ms = [16, 32, 64, 128, 256]
+Ms = [33, 65, 129, 257]
 results = []
 
 println("Benchmarking sizes: $Ms")
@@ -112,26 +112,53 @@ for M in Ms
     x_extended_gpu = CUDA.zeros(Float64, N, N, N)
     
     # Create Plans
-    p_dct1 = plan_dct1(x_gpu)
+    p_dct1 = plan_dct1_mirror(x_gpu)
+    p_dct1_sep = plan_dct1(x_gpu)
     p_rfft = plan_rfft(x_extended_gpu)
     
+    # Alloc Complex input for FFT (2M-2) comparisons
+    # This is to compare against "Naive Complex FFT of roughly 2x size" 
+    # (though typically Mirror uses RFFT 2M-2, or Separable uses FFT M-1).
+    x_complex_2m_gpu = CUDA.zeros(ComplexF64, N, N, N)
+    p_fft_2m = plan_fft!(x_complex_2m_gpu) # In-place complex plan for 2M-2
+    
     # Measure cuFFT rfft (2M-2) - reference for internal FFT cost
-    times_rfft = safe_benchmark("cuFFT rfft (2M-2)", x -> mul!(y_complex_gpu, p_rfft, x), x_extended_gpu; n_samples=5)
-    t_rfft = isempty(times_rfft) || isnan(times_rfft[1]) ? NaN : median(times_rfft)
+    times_rfft_2m = safe_benchmark("cuFFT rfft (2M-2)", x -> mul!(y_complex_gpu, p_rfft, x), x_extended_gpu; n_samples=5)
+    t_rfft_2m = isempty(times_rfft_2m) || isnan(times_rfft_2m[1]) ? NaN : median(times_rfft_2m)
+
+    # Measure cuFFT fft (2M-2) - Complex-to-Complex
+    # Note: 2M-2 size is large. Might OOM for 256^3 (512^3 complex ~ 2GB * buffers).
+    # We use safe_benchmark to handle OOM.
+    times_fft_2m = safe_benchmark("cuFFT fft (2M-2)", x -> mul!(x, p_fft_2m, x), x_complex_2m_gpu; n_samples=5)
+    t_fft_2m = isempty(times_fft_2m) || isnan(times_fft_2m[1]) ? NaN : median(times_fft_2m)
+
+    # Measure cuFFT rfft (M) - reference for same-size FFT
+    y_complex_m_gpu = CUDA.zeros(ComplexF64, M ÷ 2 + 1, M, M)
+    p_rfft_m = plan_rfft(x_gpu)
+    times_rfft_m = safe_benchmark("cuFFT rfft (M)", x -> mul!(y_complex_m_gpu, p_rfft_m, x), x_gpu; n_samples=5)
+    t_rfft_m = isempty(times_rfft_m) || isnan(times_rfft_m[1]) ? NaN : median(times_rfft_m)
     
     # Measure AcceleratedDCTs DCT-I (mul!)
-    times_opt = safe_benchmark("Opt DCT-I (mul!)", x -> mul!(y_gpu, p_dct1, x), x_gpu; n_samples=5)
+    times_opt = safe_benchmark("Mirror DCT-I (mul!)", x -> mul!(y_gpu, p_dct1, x), x_gpu; n_samples=5)
     t_opt = isempty(times_opt) || isnan(times_opt[1]) ? NaN : median(times_opt)
 
-    push!(results, (M, t_rfft, t_opt))
+    # Measure AcceleratedDCTs Separable DCT-I
+    times_sep = safe_benchmark("Separable DCT-I", x -> mul!(y_gpu, p_dct1_sep, x), x_gpu; n_samples=5)
+    t_sep = isempty(times_sep) || isnan(times_sep[1]) ? NaN : median(times_sep)
+
+    push!(results, (M, t_rfft_2m, t_fft_2m, t_rfft_m, t_opt, t_sep))
     
     # Cleanup between sizes
     x_gpu = nothing
     y_gpu = nothing
     y_complex_gpu = nothing
+    x_complex_2m_gpu = nothing # Cleanup new buffer
+    y_complex_m_gpu = nothing
     x_extended_gpu = nothing
     p_dct1 = nothing
+    p_dct1_sep = nothing
     p_rfft = nothing
+    p_rfft_m = nothing
     GC.gc()
     CUDA.reclaim()
     println()
@@ -140,11 +167,11 @@ end
 println("="^80)
 println("GPU DCT-I Performance Summary (Time in ms)")
 println("="^80)
-println("| Grid Size | cuFFT rfft (2M-2) | Opt DCT-I |")
-println("|-----------|-------------------|-----------|")
-for (M, t_rfft, t_opt) in results
-    @printf("| %3d^3     | %17.3f | %9.3f |\n", 
-            M, t_rfft, t_opt)
+println("| Grid Size | cuFFT rfft (2M-2) | cuFFT fft (2M-2)  | cuFFT rfft (M)    | Mirror DCT-I | Separable DCT-I |")
+println("|-----------|-------------------|-------------------|-------------------|--------------|-----------------|")
+for (M, t_rfft_2m, t_fft_2m, t_rfft_m, t_opt, t_sep) in results
+    @printf("| %3d^3     | %17.3f | %17.3f | %17.3f | %12.3f | %15.3f |\n", 
+            M, t_rfft_2m, t_fft_2m, t_rfft_m, t_opt, t_sep)
 end
 println("="^80)
 
