@@ -1,5 +1,5 @@
 # ============================================================================
-# DCT-I / IDCT-I Optimized Implementation
+# DCT-I / IDCT-I Implementation (Mirroring Strategy)
 # ============================================================================
 
 # ============================================================================
@@ -7,11 +7,11 @@
 # ============================================================================
 
 """
-    DCT1Plan
+    DCT1MirrorPlan
 
-Optimized DCT-I Plan for device-agnostic execution.
+Optimized DCT-I Plan using Memory-Mirroring strategy.
 """
-struct DCT1Plan{T, N, P, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
+struct DCT1MirrorPlan{T, N, P, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
     complex_plan::P      # RFFT plan
     tmp_real::BReal      # Real buffer for Mirroring (size 2M-2)
     tmp_comp::BComp      # Complex buffer for FFT
@@ -20,11 +20,11 @@ struct DCT1Plan{T, N, P, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
 end
 
 """
-    IDCT1Plan
+    IDCT1MirrorPlan
 
-Optimized IDCT-I Plan for device-agnostic execution.
+Optimized IDCT-I Plan using Memory-Mirroring strategy.
 """
-struct IDCT1Plan{T, N, P, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
+struct IDCT1MirrorPlan{T, N, P, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
     complex_plan::P      # RFFT plan (IDCT-I is same as DCT-I with scaling)
     tmp_real::BReal      # Real buffer for Mirroring
     tmp_comp::BComp      # Complex buffer for FFT
@@ -33,14 +33,14 @@ struct IDCT1Plan{T, N, P, BReal, BComp, Region} <: AbstractFFTs.Plan{T}
 end
 
 # Properties
-Base.ndims(::DCT1Plan{T, N}) where {T, N} = N
-Base.ndims(::IDCT1Plan{T, N}) where {T, N} = N
-Base.eltype(::DCT1Plan{T}) where T = T
-Base.eltype(::IDCT1Plan{T}) where T = T
+Base.ndims(::DCT1MirrorPlan{T, N}) where {T, N} = N
+Base.ndims(::IDCT1MirrorPlan{T, N}) where {T, N} = N
+Base.eltype(::DCT1MirrorPlan{T}) where T = T
+Base.eltype(::IDCT1MirrorPlan{T}) where T = T
 
-# Size for DCT1Plan: tmp_real has size (N1, N2, ...) where Ni = 2Mi-2.
+# Size for DCT1MirrorPlan: tmp_real has size (N1, N2, ...) where Ni = 2Mi-2.
 # We return (M1, M2, ...)
-function Base.size(p::Union{DCT1Plan{T, N}, IDCT1Plan{T, N}}) where {T, N}
+function Base.size(p::Union{DCT1MirrorPlan{T, N}, IDCT1MirrorPlan{T, N}}) where {T, N}
     return ntuple(i -> (size(p.tmp_real, i) ÷ 2) + 1, N)
 end
 
@@ -48,48 +48,48 @@ end
 # Plan Inversion
 # ============================================================================
 
-function Base.inv(p::DCT1Plan{T, N}) where {T, N}
+function Base.inv(p::DCT1MirrorPlan{T, N}) where {T, N}
     if p.pinv[] === nothing
         x = KernelAbstractions.allocate(get_backend(p.tmp_real), T, size(p)...)
-        p.pinv[] = plan_idct1(x, p.region)
+        p.pinv[] = plan_idct1_mirror(x, p.region)
     end
     return p.pinv[]
 end
 
-function Base.inv(p::IDCT1Plan{T, N}) where {T, N}
+function Base.inv(p::IDCT1MirrorPlan{T, N}) where {T, N}
     if p.pinv[] === nothing
         x = KernelAbstractions.allocate(get_backend(p.tmp_real), T, size(p)...)
-        p.pinv[] = plan_dct1(x, p.region)
+        p.pinv[] = plan_dct1_mirror(x, p.region)
     end
     return p.pinv[]
 end
 
 # Execution: *
-function Base.:*(p::DCT1Plan, x::AbstractArray)
+function Base.:*(p::DCT1MirrorPlan, x::AbstractArray)
     y = similar(x)
     mul!(y, p, x)
     return y
 end
 
-function Base.:*(p::IDCT1Plan, x::AbstractArray)
+function Base.:*(p::IDCT1MirrorPlan, x::AbstractArray)
     y = similar(x)
     mul!(y, p, x)
     return y
 end
 
 # Execution: \ (ldiv)
-function Base.:\(p::DCT1Plan, x::AbstractArray)
+function Base.:\(p::DCT1MirrorPlan, x::AbstractArray)
     inv_p = inv(p)
     return inv_p * x
 end
 
-function Base.:\(p::IDCT1Plan, x::AbstractArray)
+function Base.:\(p::IDCT1MirrorPlan, x::AbstractArray)
     inv_p = inv(p)
     return inv_p * x
 end
 
 # Support ldiv!(y, plan, x) => mul!(y, inv(plan), x)
-function LinearAlgebra.ldiv!(y::AbstractArray, p::Union{DCT1Plan, IDCT1Plan}, x::AbstractArray)
+function LinearAlgebra.ldiv!(y::AbstractArray, p::Union{DCT1MirrorPlan, IDCT1MirrorPlan}, x::AbstractArray)
     inv_p = inv(p)
     mul!(y, inv_p, x)
 end
@@ -98,9 +98,9 @@ end
 # Plan Creation
 # ============================================================================
 
-function plan_dct1(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
+function plan_dct1_mirror(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
     if region != 1:N && region != 1:ndims(x) && region != (1:ndims(x)...,)
-        error("Partial DCT1 optimization not yet implemented.")
+        error("Partial DCT1 (Mirror) optimization not yet implemented.")
     end
 
     M = size(x)
@@ -119,14 +119,14 @@ function plan_dct1(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
     # 2. Plan RFFT
     complex_plan = plan_rfft(tmp_real)
 
-    return DCT1Plan{T, N, typeof(complex_plan), typeof(tmp_real), typeof(tmp_comp), typeof(region)}(
+    return DCT1MirrorPlan{T, N, typeof(complex_plan), typeof(tmp_real), typeof(tmp_comp), typeof(region)}(
         complex_plan, tmp_real, tmp_comp, region, Ref{Any}(nothing)
     )
 end
 
-function plan_idct1(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
-    p = plan_dct1(x, region)
-    return IDCT1Plan{T, N, typeof(p.complex_plan), typeof(p.tmp_real), typeof(p.tmp_comp), typeof(region)}(
+function plan_idct1_mirror(x::AbstractArray{T, N}, region=1:N) where {T <: Real, N}
+    p = plan_dct1_mirror(x, region)
+    return IDCT1MirrorPlan{T, N, typeof(p.complex_plan), typeof(p.tmp_real), typeof(p.tmp_comp), typeof(region)}(
         p.complex_plan, p.tmp_real, p.tmp_comp, p.region, Ref{Any}(nothing)
     )
 end
@@ -135,7 +135,7 @@ end
 # Execution (mul!)
 # ============================================================================
 
-function LinearAlgebra.mul!(y::AbstractArray, p::DCT1Plan{T, 1}, x::AbstractArray) where T
+function LinearAlgebra.mul!(y::AbstractArray, p::DCT1MirrorPlan{T, 1}, x::AbstractArray) where T
     backend = get_backend(x)
     M = size(x, 1)
     N = 2M - 2
@@ -161,7 +161,7 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCT1Plan{T, 1}, x::AbstractArra
     return y
 end
 
-function LinearAlgebra.mul!(y::AbstractArray, p::DCT1Plan{T, 2}, x::AbstractArray) where T
+function LinearAlgebra.mul!(y::AbstractArray, p::DCT1MirrorPlan{T, 2}, x::AbstractArray) where T
     backend = get_backend(x)
     M1, M2 = size(x)
     N1, N2 = 2M1-2, 2M2-2
@@ -187,7 +187,7 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCT1Plan{T, 2}, x::AbstractArra
     return y
 end
 
-function LinearAlgebra.mul!(y::AbstractArray, p::DCT1Plan{T, 3}, x::AbstractArray) where T
+function LinearAlgebra.mul!(y::AbstractArray, p::DCT1MirrorPlan{T, 3}, x::AbstractArray) where T
     backend = get_backend(x)
     M1, M2, M3 = size(x)
     N1, N2, N3 = 2M1-2, 2M2-2, 2M3-2
@@ -213,24 +213,24 @@ function LinearAlgebra.mul!(y::AbstractArray, p::DCT1Plan{T, 3}, x::AbstractArra
     return y
 end
 
-function LinearAlgebra.mul!(y::AbstractArray, p::IDCT1Plan{T, 1}, x::AbstractArray) where T
-    p_fwd = DCT1Plan{T, 1, typeof(p.complex_plan), typeof(p.tmp_real), typeof(p.tmp_comp), typeof(p.region)}(p.complex_plan, p.tmp_real, p.tmp_comp, p.region, p.pinv)
+function LinearAlgebra.mul!(y::AbstractArray, p::IDCT1MirrorPlan{T, 1}, x::AbstractArray) where T
+    p_fwd = DCT1MirrorPlan{T, 1, typeof(p.complex_plan), typeof(p.tmp_real), typeof(p.tmp_comp), typeof(p.region)}(p.complex_plan, p.tmp_real, p.tmp_comp, p.region, p.pinv)
     mul!(y, p_fwd, x)
     M = size(x, 1)
     y ./= (2M - 2)
     return y
 end
 
-function LinearAlgebra.mul!(y::AbstractArray, p::IDCT1Plan{T, 2}, x::AbstractArray) where T
-    p_fwd = DCT1Plan{T, 2, typeof(p.complex_plan), typeof(p.tmp_real), typeof(p.tmp_comp), typeof(p.region)}(p.complex_plan, p.tmp_real, p.tmp_comp, p.region, p.pinv)
+function LinearAlgebra.mul!(y::AbstractArray, p::IDCT1MirrorPlan{T, 2}, x::AbstractArray) where T
+    p_fwd = DCT1MirrorPlan{T, 2, typeof(p.complex_plan), typeof(p.tmp_real), typeof(p.tmp_comp), typeof(p.region)}(p.complex_plan, p.tmp_real, p.tmp_comp, p.region, p.pinv)
     mul!(y, p_fwd, x)
     M1, M2 = size(x)
     y ./= (2M1 - 2) * (2M2 - 2)
     return y
 end
 
-function LinearAlgebra.mul!(y::AbstractArray, p::IDCT1Plan{T, 3}, x::AbstractArray) where T
-    p_fwd = DCT1Plan{T, 3, typeof(p.complex_plan), typeof(p.tmp_real), typeof(p.tmp_comp), typeof(p.region)}(p.complex_plan, p.tmp_real, p.tmp_comp, p.region, p.pinv)
+function LinearAlgebra.mul!(y::AbstractArray, p::IDCT1MirrorPlan{T, 3}, x::AbstractArray) where T
+    p_fwd = DCT1MirrorPlan{T, 3, typeof(p.complex_plan), typeof(p.tmp_real), typeof(p.tmp_comp), typeof(p.region)}(p.complex_plan, p.tmp_real, p.tmp_comp, p.region, p.pinv)
     mul!(y, p_fwd, x)
     M1, M2, M3 = size(x)
     y ./= (2M1 - 2) * (2M2 - 2) * (2M3 - 2)
@@ -313,12 +313,12 @@ end
 # Convenience Functions
 # ============================================================================
 
-function dct1(x::AbstractArray{T, N}) where {T <: Real, N}
-    p = plan_dct1(x)
+function dct1_mirror(x::AbstractArray{T, N}) where {T <: Real, N}
+    p = plan_dct1_mirror(x)
     return p * x
 end
 
-function idct1(x::AbstractArray{T, N}) where {T <: Real, N}
-    p = plan_idct1(x)
+function idct1_mirror(x::AbstractArray{T, N}) where {T <: Real, N}
+    p = plan_idct1_mirror(x)
     return p * x
 end
