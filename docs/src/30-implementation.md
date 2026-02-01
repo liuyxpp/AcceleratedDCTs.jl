@@ -17,9 +17,16 @@ To maximize performance, we separate **resource allocation** (cheap on CPU, expe
     *   Creates an internal FFT plan (`plan_rfft`).
     *   Pre-calculates twiddle factors (`cispi(...)`) on the device.
 
-### DCT-I Plans (Optimized)
+### DCT-I Plans (VkDCT / Extension)
+*   **`plan_dct1(x)`** via **`VkDCTExt`**:
+    *   **Backend**: Uses custom `VkFFT` based C++ library (`libvkfft_dct.so`) loaded via `VkDCTExt` extension.
+    *   **Availability**: Triggered automatically when `CUDA.jl` is loaded and the library is available.
+    *   **Performance**: Extremely fast (~7x-15x faster than Separable) due to hand-tuned kernels and reduced memory traffic.
+    *   **Features**: Supports `Float32`/`Float64`, full 3D transforms.
+
+### DCT-I Plans (Generic / Separable)
 *   **`plan_dct1(x)`** / **`plan_idct1(x)`**:
-    *   **Default (GPU/Generic)**: Uses **Separable Split-Radix** algorithm.
+    *   **Default (Generic GPU)**: Uses **Separable Split-Radix** algorithm.
         *   Maps $M$ points to size $N=M-1$ Complex FFT.
         *   **GPU Strategy**: Uses a **Permuted** approach to ensure Unit Stride memory access for internal FFTs across all dimensions, maximizing performance.
         *   Memory scaling: $O(M^D)$ (efficient for N-D).
