@@ -17,11 +17,20 @@ To maximize performance, we separate **resource allocation** (cheap on CPU, expe
     *   Creates an internal FFT plan (`plan_rfft`).
     *   Pre-calculates twiddle factors (`cispi(...)`) on the device.
 
-### DCT-I Plans
+### DCT-I Plans (Optimized)
 *   **`plan_dct1(x)`** / **`plan_idct1(x)`**:
-    *   **CPU (`Array`)**: Uses FFTW's native `REDFT00` for optimal performance.
-    *   **GPU (`CuArray`)**: Uses mirroring buffer (size `2M-2`) + R2C FFT.
-    *   Dispatch is automatic based on array type.
+    *   **Default (GPU/Generic)**: Uses **Separable Split-Radix** algorithm.
+        *   Maps $M$ points to size $N=M-1$ Complex FFT.
+        *   Memory scaling: $O(M^D)$ (efficient for N-D).
+    *   **CPU (`Array`)**: Uses FFTW's native `REDFT00`.
+    *   Dispatch is automatic.
+
+### DCT-I Plans (Mirroring / Legacy)
+*   **`plan_dct1_mirror(x)`** / **`plan_idct1_mirror(x)`**:
+    *   Uses **Mirroring** strategy.
+    *   Maps $M$ points to size $2M-2$ Real FFT.
+    *   Memory scaling: $O((2M)^D)$ (expensive for N-D).
+    *   Available as an alternative for validation.
 
 ### Execution
 *   **`mul!(y, p, x)`**:
