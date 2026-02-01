@@ -13,7 +13,48 @@ graph TD
     CUDA --> GPU[NVIDIA GPU]
 ```
 
-## 1. VkFFT Compilation Strategy
+## 1. Compilation Instructions
+
+To use VkDCT, you must compile the `libvkfft_dct.so` library manually. This library is not distributed with the package due to its dependency on the VkFFT header-only library and local CUDA configuration.
+
+### Prerequisites
+*   **CUDA Toolkit** (installed and in `PATH`, providing `nvcc`).
+*   **git** (to clone VkFFT).
+
+### Steps
+
+1.  **Clone VkFFT**:
+    Clone the VkFFT repository to get the necessary headers.
+    ```bash
+    git clone https://github.com/DTolm/VkFFT.git /tmp/VkFFT
+    ```
+    *(Or any other location)*
+
+2.  **Copy Headers**:
+    Copy the `vkFFT.h` file and the `vkFFT` directory from the cloned repo to the `lib/VkDCT/` directory (where `compile.sh` resides).
+    ```bash
+    # Assuming you are in AcceleratedDCTs.jl root
+    cp /tmp/VkFFT/vkFFT.h lib/VkDCT/
+    cp -r /tmp/VkFFT/vkFFT lib/VkDCT/
+    ```
+
+3.  **Adjust Architecture**:
+    Edit `lib/VkDCT/compile.sh` to match your GPU architecture.
+    Find the `-arch=sm_75` flag and change it to your device's compute capability (e.g., `sm_80` for A100, `sm_86` for RTX 3090, `sm_89` for RTX 4090).
+    ```bash
+    # Example in compile.sh
+    nvcc -O3 --shared ... -arch=sm_86 ...
+    ```
+
+4.  **Compile**:
+    Run the compilation script.
+    ```bash
+    cd lib/VkDCT
+    ./compile.sh
+    ```
+    This should produce `libvkfft_dct.so`.
+
+## 2. Architecture Overview
 
 VkFFT is a header-only library (`vkFFT.h`), but it requires backend-specific configuration at compile time.
 
@@ -33,9 +74,11 @@ nvcc -O3 --shared -Xcompiler -fPIC \
 - `-shared -fPIC`: Generates a dynamic shared object (`.so`) loadable by Julia's `Libdl`.
 - `-lcuda -lnvrtc`: Links essential CUDA libraries required by VkFFT.
 
-## 2. dct_shim.cu Details
+## 3. dct_shim.cu Details
 
 The C++ shim acts as a bridge between Julia's C interface (`ccall`) and VkFFT's C-like configuration structs.
+<... truncated implementation details ...>
+
 
 ### Data Structures
 - **`VkDCTContext`**: Persists state across calls. It holds:
@@ -60,7 +103,7 @@ The C++ shim acts as a bridge between Julia's C interface (`ccall`) and VkFFT's 
     -   Calls `VkFFTAppend` to execute the kernel.
     -   **Note**: DCT-I is its own inverse (up to a scale factor), so `inverse` flag primarily affects internal normalization checks (which we disabled), but we pass it correctly for semantic correctness.
 
-## 3. VkDCT.jl Wrapper
+## 4. VkDCT.jl Wrapper
 
 The Julia wrapper provides a high-level, idiomatic interface.
 
