@@ -10,10 +10,24 @@ using AbstractFFTs
 # Configuration
 # ============================================================================
 
-# Library path: assumes libvkfft_dct.so is in ../lib/VkDCT/ relative to package root
-# We need to find the package root.
-# Since this is an extension, @__DIR__ is inside /ext/
-const LIB_MKDCT_PATH = joinpath(@__DIR__, "..", "lib", "VkDCT", "libvkfft_dct.so")
+# Library path determination
+function _get_lib_path()
+    # 1. Environment Variable Override (for testing/JLL injection)
+    if haskey(ENV, "VKDCT_LIB")
+        return ENV["VKDCT_LIB"]
+    end
+
+    # 2. TODO: check for VkDCT_jll if loaded?
+    # needs: using VkDCT_jll
+    # return VkDCT_jll.libvkfft_dct
+
+    # 3. Fallback: Local Library in lib/VkDCT
+    # We assume standard package structure: /ext/VkDCTExt.jl -> /lib/VkDCT/libvkfft_dct.so
+    path = joinpath(@__DIR__, "..", "lib", "VkDCT", "libvkfft_dct.so")
+    return abspath(path)
+end
+
+const LIB_MKDCT_PATH = _get_lib_path()
 
 # ============================================================================
 # Plan Definition
