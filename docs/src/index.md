@@ -15,8 +15,7 @@ The core innovation of this package is the implementation of **Algorithm 2 (2D)*
 *   **⚡ High Performance**: optimized algorithms (Makhoul's method) that outperform standard separable approaches.
 *   **🧠 Efficient DCT-I**: New separable split-radix algorithm for DCT-I that avoids memory expansion ($O(M)$ vs old $O(2M)$).
 *   **🚀 Device Agnostic**: Runs on CPU (Threads) and GPU (`CuArray`, `ROCArray` via `KernelAbstractions`).
-*   **🔥 VkDCT Backend**: Optional experimental C++/Vulkan backend for DCT-I offering **~15x speedup** on GPU compared to the pure Julia implementation.
+*   **🔥 VkDCT Backend**: Pre-compiled [VkFFT](https://github.com/DTolm/VkFFT)-based CUDA library (`VkDCT_jll`) for DCT-I offering **~15x speedup** on GPU. Zero-setup: just `using CUDA, AcceleratedDCTs`.
 *   **🧩 AbstractFFTs Compatible**: Zero-allocation `mul!`, `ldiv!`, and precomputed `Plan` support.
-*   **📦 3D Optimized**: Specialized 3D kernels that avoid redundant transposes.
 *   **📦 3D Optimized**: Specialized 3D kernels that avoid redundant transposes.
 

@@ -2,6 +2,7 @@ module VkDCTExt
 
 using AcceleratedDCTs
 using CUDA
+using VkDCT_jll
 using Libdl
 using LinearAlgebra
 using AbstractFFTs
@@ -10,10 +11,24 @@ using AbstractFFTs
 # Configuration
 # ============================================================================
 
-# Library path: assumes libvkfft_dct.so is in ../lib/VkDCT/ relative to package root
-# We need to find the package root.
-# Since this is an extension, @__DIR__ is inside /ext/
-const LIB_MKDCT_PATH = joinpath(@__DIR__, "..", "lib", "VkDCT", "libvkfft_dct.so")
+# Library path determination
+function _get_lib_path()
+    # 1. Environment Variable Override (for dev/testing)
+    if haskey(ENV, "VKDCT_LIB")
+        return ENV["VKDCT_LIB"]
+    end
+
+    # 2. JLL package (primary production path)
+    if VkDCT_jll.is_available()
+        return VkDCT_jll.libvkfft_dct
+    end
+
+    # 3. Fallback: Local Library in lib/VkDCT (for development)
+    path = joinpath(@__DIR__, "..", "lib", "VkDCT", "libvkfft_dct.so")
+    return abspath(path)
+end
+
+const LIB_MKDCT_PATH = _get_lib_path()
 
 # ============================================================================
 # Plan Definition

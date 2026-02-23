@@ -17,7 +17,7 @@ It leverages **KernelAbstractions.jl** to run efficiently on both CPUs (multithr
 
 *   **⚡ High Performance**: optimized algorithms (Makhoul's method) that outperform standard separable approaches.
 *   **🚀 Device Agnostic**: Runs on CPU (Threads) and GPU (`CuArray`, `ROCArray` via `KernelAbstractions`).
-*   **🔥 VkDCT Backend**: Optional experimental C++/Vulkan backend for DCT-I offering **~15x speedup** on GPU compared to the pure Julia implementation.
+*   **🔥 VkDCT Backend**: Pre-compiled [VkFFT](https://github.com/DTolm/VkFFT)-based CUDA library (`VkDCT_jll`) for DCT-I offering **~15x speedup** on GPU. Zero-setup: just `using CUDA, AcceleratedDCTs`.
 *   **🧩 AbstractFFTs Compatible**: Zero-allocation `mul!`, `ldiv!`, and precomputed `Plan` support.
 *   **📦 3D Optimized**: Specialized 3D kernels that avoid redundant transposes.
 
@@ -113,24 +113,19 @@ Measurement of **3D DCT-I** performance. Compares `Opt DCT-I` against raw `cuFFT
  
 ## VkDCT Extension (High Performance GPU DCT-I)
 
-For maximum performance on NVIDIA GPUs (providing **7x-15x speedup** over the device-agnostic backend), you can compile the optional `VkDCT` library.
+For maximum performance on NVIDIA GPUs (providing **7x-15x speedup** over the device-agnostic backend), AcceleratedDCTs.jl integrates [`VkDCT_jll`](https://github.com/JuliaBinaryWrappers/VkDCT_jll.jl), a pre-compiled [VkFFT](https://github.com/DTolm/VkFFT)-based CUDA library. **No manual compilation is required.**
 
-**Setup**:
-1.  Ensure you have `cmake` and `nvcc` (CUDA Toolkit) installed.
-2.  Run the compilation script:
-    ```bash
-    cd lib/VkDCT
-    ./compile.sh
-    ```
-3.  Load `CUDA` in your Julia session. The extension `VkDCTExt` will automatically load and accelerate `plan_dct1` for `CuArray`.
+When `CUDA.jl` is loaded, the `VkDCTExt` extension automatically activates and accelerates `plan_dct1` for `CuArray`:
 
 ```julia
 using AcceleratedDCTs
 using CUDA
 
-# Automatically uses VkDCT if compiled
-p = plan_dct1(CuArray(rand(128, 128, 128))) 
+# Automatically uses VkDCT backend on GPU
+p = plan_dct1(CuArray(rand(128, 128, 128)))
 ```
+
+> **Note**: `VkDCT_jll` is installed automatically as a dependency. On systems without CUDA, it has no effect.
 
 ## Documentation
 

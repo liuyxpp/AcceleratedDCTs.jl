@@ -18,3 +18,4 @@ docs/tweet.md
 lib/VkDCT/libvkfft_dct.so
 lib/VkDCT/VkFFT
 lib/VkDCT/vkFFT/*
+lib/VkDCT/build/*

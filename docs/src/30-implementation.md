@@ -19,8 +19,8 @@ To maximize performance, we separate **resource allocation** (cheap on CPU, expe
 
 ### DCT-I Plans (VkDCT / Extension)
 *   **`plan_dct1(x)`** via **`VkDCTExt`**:
-    *   **Backend**: Uses custom `VkFFT` based C++ library (`libvkfft_dct.so`) loaded via `VkDCTExt` extension.
-    *   **Availability**: Triggered automatically when `CUDA.jl` is loaded and the library is available.
+    *   **Backend**: Uses [`VkDCT_jll`](https://github.com/JuliaBinaryWrappers/VkDCT_jll.jl), a pre-compiled [VkFFT](https://github.com/DTolm/VkFFT)-based CUDA library. No manual compilation required.
+    *   **Availability**: Triggered automatically when `CUDA.jl` is loaded. The library is loaded from `VkDCT_jll` (with `ENV["VKDCT_LIB"]` override and local fallback for development).
     *   **Performance**: Extremely fast (~7x-15x faster than Separable) due to hand-tuned kernels and reduced memory traffic.
     *   **Features**: Supports `Float32`/`Float64`, full 3D transforms.
 

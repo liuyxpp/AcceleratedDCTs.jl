@@ -108,11 +108,13 @@ mul!(x_rec, pinv, y)
 Simply pass a `CuArray` (or `ROCArray`) to the functions. The package automatically selects the appropriate GPU kernel.
 
 ```julia
-using CUDA
+using CUDA, AcceleratedDCTs
 x_gpu = CUDA.rand(128, 128, 128)
 p = plan_dct(x_gpu)
 y_gpu = p * x_gpu
 ```
+
+> **VkDCT Acceleration**: For 3D DCT-I on NVIDIA GPUs, the `VkDCTExt` extension automatically loads the pre-compiled `VkDCT_jll` library, providing ~7x-15x speedup over the generic backend. No extra setup needed — just `using CUDA, AcceleratedDCTs`.
 
 ### Precision (Float32 vs Float64)
 The package supports any `AbstractFloat` type. For maximum performance on GPUs, use `Float32`.
