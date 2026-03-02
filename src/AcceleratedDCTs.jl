@@ -17,9 +17,6 @@ include("dct_optimized.jl")
 include("dct1_separable.jl")
 include("dct1_mirror.jl")
 
-# FFTW-based DCT-I for CPU (faster than generic implementation)
-include("dct1_fftw.jl")
-
 public dct1d, idct1d, dct2d, idct2d, dct3d, idct3d  # reference implementations
 public dct_batched, idct_batched  # batched implementations
 public DCTBatchedPlan, plan_dct_batched  # planned batched implementations
